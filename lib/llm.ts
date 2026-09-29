@@ -191,13 +191,15 @@ export async function probeThinking(model = "nvidia/nemotron-3-super-120b-a12b")
     ["system_no_think", {}, "/no_think You are helpful."],
     ["reasoning_effort_low", { reasoning_effort: "low" }, "You are helpful."],
   ];
-  await Promise.all(variants.map(async ([k, extra, sys]) => { const t = Date.now();
+  for (const [k, extra, sys] of variants) { const t = Date.now();
     try {
       const r = await fetch(`${p.base}/chat/completions`, { method: "POST", signal: AbortSignal.timeout(60000), headers: { Authorization: `Bearer ${p.key()}`, "Content-Type": "application/json" },
         body: JSON.stringify({ model, max_tokens: 400, messages: [{ role: "system", content: sys }, { role: "user", content: "List 3 Indian cities as a markdown table with one column. Only the table." }], ...extra }) });
-      const j = await r.json(); const m = j.choices?.[0]?.message ?? {};
-      out[k] = { status: r.status, ms: Date.now() - t, keys: Object.keys(m), content: String(m.content ?? j.error?.message ?? JSON.stringify(j).slice(0, 200)).slice(0, 260), reasoning: String(m.reasoning_content ?? m.reasoning ?? "").slice(0, 80) };
-    } catch (e) { out[k] = String(e); } }));
+      const raw = await r.text(); let j: Record<string, any> = {}; try { j = JSON.parse(raw); } catch { /* not json */ } // eslint-disable-line @typescript-eslint/no-explicit-any
+      const m = j.choices?.[0]?.message ?? {};
+      out[k] = { status: r.status, ms: Date.now() - t, keys: Object.keys(m), content: String(m.content ?? raw).slice(0, 260), reasoning: String(m.reasoning_content ?? m.reasoning ?? "").slice(0, 80) };
+    } catch (e) { out[k] = String(e); }
+  }
   return out;
 }
 
