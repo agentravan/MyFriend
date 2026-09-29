@@ -57,6 +57,8 @@ async function openaiCompat(p: P, o: Opts) {
       body: JSON.stringify({
         model, temperature: o.temperature ?? 0.5, max_tokens: o.maxTokens ?? 700,
         ...(o.json && p.jsonMode && { response_format: { type: "json_object" } }),
+        // Nemotron "thinks out loud" and can leak it into long answers; probed 2026-09-29: this switch turns thinking off cleanly.
+        ...(p.name === "nvidia" && /nemotron/i.test(model) && { chat_template_kwargs: { enable_thinking: false } }),
         messages: [{ role: "system", content: o.system + (o.privateCtx ? "\n\n" + o.privateCtx : "") }, ...o.msgs],
       }),
     });
