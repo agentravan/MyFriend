@@ -61,27 +61,38 @@ async function research(c: Ctx): Promise<Out> {
   const ask = async (prompt: string) => parseJSON<{ queries?: string[] }>((await llm({ system: "You write precise web search queries. Output JSON only.", json: true,
     maxTokens: 300, prefer: "fast", strict: true, msgs: [{ role: "user", content: prompt }] })).text, {}).queries?.slice(0, 4) ?? [];
   const seen = new Set<string>(), hits: Hit[] = [], answers: Hit[] = [];
+  // Enrichment mode: earlier steps already listed companies → look each one up individually for website/contact info.
+  const enrich = leads && /contact|website|email|phone|detail|enrich/i.test(c.step.instruction + c.step.title) && /\|/.test(c.prior);
+  if (enrich) {
+    const { text } = await llm({ system: "Extract organisations from research notes. Output JSON only.", json: true, maxTokens: 900, prefer: "fast", strict: true,
+      msgs: [{ role: "user", content: `From these notes, list up to 15 distinct organisations with their city/area.\n${c.prior.slice(0, 9000)}\nJSON: {"orgs":[{"name":"","city":""}]}` }] });
+    const orgs = parseJSON<{ orgs?: { name: string; city?: string }[] }>(text, {}).orgs?.filter((o) => o?.name).slice(0, 15) ?? [];
+    for (let i = 0; i < orgs.length; i += 5) {
+      const batch = await Promise.all(orgs.slice(i, i + 5).map((o) => search(`"${o.name}" ${o.city ?? ""} official website contact phone email`, 3).catch(() => [])));
+      batch.forEach((hs, k) => hs.forEach((h) => { if (h.url && !seen.has(h.url)) { seen.add(h.url); hits.push({ ...h, title: `${orgs[i + k].name} → ${h.title}` }); } }));
+    }
+  }
   const gather = async (qs: string[]) => {
     for (const h of (await Promise.all(qs.map((q) => search(q, 8)))).flat()) {
       if (!h.url) answers.push(h); else if (!seen.has(h.url)) { seen.add(h.url); hits.push(h); }
     }
   };
-  // Round 1
-  const q1 = await ask(`${context(c)}\n\nWrite 4 web search queries (India-focused if relevant).${leads ? " Target real, specific businesses: directories (Justdial, IndiaMART, Clutch, LinkedIn company pages), 'list of … companies in <city>', industry associations, recent news of hiring/expansion." : ""} JSON: {"queries":["..."]}`);
-  await gather(q1.length ? q1 : [c.step.title]);
+  // Round 1 (skipped in enrichment mode)
+  const q1 = enrich ? [] : await ask(`${context(c)}\n\nWrite 4 web search queries (India-focused if relevant).${leads ? " Target real, specific businesses: directories (Justdial, IndiaMART, Clutch, LinkedIn company pages), 'list of … companies in <city>', industry associations, recent news of hiring/expansion." : ""} JSON: {"queries":["..."]}`);
+  if (!enrich) await gather(q1.length ? q1 : [c.step.title]);
   // Round 2: fill gaps found in round 1
-  const q2 = await ask(`${context(c)}\n\nRound-1 results (titles):\n${hits.slice(0, 20).map((h) => "- " + h.title).join("\n") || "(none)"}\n\nWrite up to 3 follow-up queries that fill the biggest gaps${leads ? " (e.g. specific company names + \"contact\", official websites, city-specific directories)" : ""}. JSON: {"queries":["..."]}`);
-  if (q2.length) await gather(q2);
+  const q2 = enrich ? [] : await ask(`${context(c)}\n\nRound-1 results (titles):\n${hits.slice(0, 20).map((h) => "- " + h.title).join("\n") || "(none)"}\n\nWrite up to 3 follow-up queries that fill the biggest gaps${leads ? " (e.g. specific company names + \"contact\", official websites, city-specific directories)" : ""}. JSON: {"queries":["..."]}`);
+  if (q2.length && !enrich) await gather(q2);
   // Read the best pages (Tavily already returns page text; others are fetched)
-  const pages = await Promise.all(hits.slice(0, 8).map(async (h) => ({ ...h, body: h.body || (await read(h.url, 3500)) })));
+  const pages = await Promise.all(hits.slice(0, enrich ? 30 : 8).map(async (h) => ({ ...h, body: h.body || (enrich ? h.snippet : await read(h.url, 3500)) })));
   const corpus = [
     ...answers.slice(0, 2).map((a) => `[G] ${a.title}\n${a.snippet}`),
-    ...pages.map((p, i) => `[${i + 1}] ${p.title} — ${p.url}\n${(p.body || p.snippet).slice(0, 2800)}`),
-    ...hits.slice(8, 24).map((h, i) => `[${i + 9}] ${h.title} — ${h.url}\n${h.snippet}`),
+    ...pages.map((p, i) => `[${i + 1}] ${p.title} — ${p.url}\n${(p.body || p.snippet).slice(0, enrich ? 850 : 2800)}`),
+    ...(enrich ? [] : hits.slice(8, 24).map((h, i) => `[${i + 9}] ${h.title} — ${h.url}\n${h.snippet}`)),
   ].join("\n\n").slice(0, 26000);
   if (!corpus) return { output: `Web search returned no results (${[...q1, ...q2].join(" | ")}). Check TAVILY_API_KEY in Vercel.` };
   const { text: notes } = await llm({ system: c.system + "\nYou are NOVA's Research Agent. Use ONLY the sources given; cite as [n]. Never invent companies, people, numbers, emails or phone numbers. Output only the findings — no agent name, no meta commentary." +
-      (leads ? " For leads: list EVERY distinct real business found (aim for 15–30) as a table: Name | What they do | City | Website | Phone/Email (only if shown in the source) | Why relevant | Source [n]." : ""),
+      (leads ? " For leads: list EVERY distinct real business found (aim for 15–30) as a table: Name | What they do | City | Website | Phone/Email (only if shown in the source) | Why relevant | Source [n]. Leave unknown cells blank (no 'Not available' text)." : ""),
     maxTokens: 3500, timeoutMs: 150000, strict: true,
     msgs: [{ role: "user", content: `${context(c)}\n\nSOURCES (web, fetched ${now().slice(0, 10)}; ${hits.length} results from ${q1.length + q2.length} searches):\n${corpus}\n\nWrite concise research notes that answer the instruction. End with a "Sources" list of [n] title — url.` }] });
   return { output: notes };
@@ -94,8 +105,8 @@ async function think(c: Ctx, role: string): Promise<Out> {
 }
 
 async function data(c: Ctx): Promise<Out> {
-  const { text } = await llm({ system: `You are NOVA's Data Agent. Produce ONE CSV table only (header row first, comma-separated, quote fields containing commas). No prose, no code fences. Use only facts present in the context; leave unknown cells empty. Never invent emails or phone numbers.`,
-    maxTokens: 2500, timeoutMs: 120000, prefer: "fast", strict: true, msgs: [{ role: "user", content: context(c) }] });
+  const { text } = await llm({ system: `You are NOVA's Data Agent. Produce ONE CSV table only (header row first, comma-separated, quote fields containing commas). No prose, no code fences. Include EVERY row found in the earlier steps — do not drop any. Use only facts present in the context; leave unknown cells completely EMPTY (never write "Not available" or "N/A"). Never invent emails or phone numbers. Merge info about the same organisation from different steps into one row.`,
+    maxTokens: 4500, timeoutMs: 120000, prefer: "fast", strict: true, msgs: [{ role: "user", content: context(c) }] });
   const csv = text.replace(/```(csv)?/g, "").trim();
   const rows = csv.split("\n").length - 1;
   return { output: `Built a table with ${rows} rows.\n\n${csv.split("\n").slice(0, 8).join("\n")}${rows > 7 ? "\n…" : ""}`,
