@@ -16,8 +16,9 @@ export const GEMINI_KEY = () => env("GEMINI_API_KEY", "Gemini", "GEMINI", "GEMIN
 type P = { name: string; base: string; key: () => string | undefined; override?: string; prefer: string[]; jsonMode: boolean };
 const OPENAI_COMPAT: P[] = [
   { name: "nvidia", base: "https://integrate.api.nvidia.com/v1", key: NVIDIA_KEY, override: "NVIDIA_MODEL", jsonMode: false,
-    prefer: ["deepseek-ai/deepseek-v4.1-flash", "z-ai/glm-5.3-flash", "moonshotai/kimi-k2.6", "nvidia/nemotron-3-super-120b-a12b",
-      "nvidia/llama-3.1-nemotron-70b-instruct", "mistralai/mistral-large-2-instruct", "openai/gpt-oss-20b", "meta/llama-3.3-70b-instruct"] },
+    // Probed 2026-09-29 on the user's key: nemotron-3-super 200 in 0.4s; kimi/llama/mistral 404; deepseek/glm/gpt-oss timed out.
+    prefer: ["nvidia/nemotron-3-super-120b-a12b", "nvidia/nemotron-3.5-lightning-30b-a3b", "nvidia/nemotron-nano-3-30b-a3b",
+      "nvidia/llama-3.1-nemotron-ultra-253b-v1", "deepseek-ai/deepseek-v4.1-flash", "z-ai/glm-5.3-flash", "moonshotai/kimi-k2.6"] },
   { name: "groq", base: "https://api.groq.com/openai/v1", key: GROQ_KEY, override: "GROQ_MODEL", jsonMode: true,
     prefer: ["llama-3.3-70b-versatile", "openai/gpt-oss-120b", "moonshotai/kimi-k2-instruct", "qwen/qwen3-32b", "llama-3.1-8b-instant"] },
 ];
@@ -71,6 +72,7 @@ async function openaiCompat(p: P, o: Opts) {
 }
 
 let geminiModel: string | undefined;
+const badGemini = new Set<string>();
 async function pickGemini() {
   if (geminiModel) return geminiModel;
   try {
@@ -78,8 +80,11 @@ async function pickGemini() {
     const ms: { name: string; supportedGenerationMethods?: string[] }[] = r.ok ? (await r.json()).models ?? [] : [];
     const gen = ms.filter((m) => m.supportedGenerationMethods?.includes("generateContent")).map((m) => m.name.replace("models/", ""));
     const ver = (s: string) => parseFloat(s.match(/gemini-(\d+(\.\d+)?)/)?.[1] ?? "0");
-    const pick = (re: RegExp) => gen.filter((n) => re.test(n) && !/preview|exp|thinking|image|tts|live|lite/i.test(n)).sort((a, b) => ver(b) - ver(a))[0];
-    geminiModel = process.env.GEMINI_MODEL || pick(/^gemini-[\d.]+-flash$/) || pick(/flash/) || pick(/pro/) || gen.find((n) => n.startsWith("gemini")) || "gemini-flash-latest";
+    const ok = (n: string) => gen.includes(n) && !badGemini.has(n);
+    // Probed 2026-09-29: gemini-3-flash-preview 200 in ~1s; 2.5 models 404; pro models 429 on free tier; flash-latest 22s.
+    const PREF = [process.env.GEMINI_MODEL ?? "", "gemini-3-flash-preview", "gemini-3.1-flash-lite-preview", "gemini-flash-lite-latest", "gemini-flash-latest"];
+    const pick = (re: RegExp) => gen.filter((n) => re.test(n) && !badGemini.has(n) && !/exp|thinking|image|tts|live|embed/i.test(n)).sort((a, b) => ver(b) - ver(a))[0];
+    geminiModel = PREF.find(ok) || pick(/flash/) || pick(/pro/) || "gemini-flash-latest";
   } catch { geminiModel = process.env.GEMINI_MODEL || "gemini-flash-latest"; }
   return geminiModel;
 }
@@ -97,7 +102,7 @@ async function gemini(o: Opts & { tools?: object[] }): Promise<{ text: string; r
     }),
   });
   if (!r.ok) {
-    if (r.status === 404) geminiModel = undefined;
+    if (r.status === 404 || r.status === 429) { badGemini.add(model); geminiModel = undefined; }
     throw new Error(r.status === 400 || r.status === 403 ? `gemini: key rejected (${r.status})` : `gemini ${r.status}`);
   }
   const j = await r.json();
