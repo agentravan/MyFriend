@@ -212,16 +212,18 @@ export default function Home() {
         <div className="top-r">
           <span className="clock">{clock}</span>
           {linked && <span className="tag-ok" title="Phone Link connected">📱</span>}
-          <button className={`chip-btn ${mission ? "on" : ""}`} onClick={() => { setMission(!mission); ls.set("nova_mission", !mission); }} title="Mission mode: every command becomes an autonomous mission">🎯 Mission</button>
+          <button className={`chip-btn ${mission ? "on" : ""}`} onClick={() => { setMission(!mission); ls.set("nova_mission", !mission); }} title="Mission mode: every command becomes an autonomous mission">🎯<span> Mission</span></button>
           <button className="icon" onClick={() => { setTalk(!talk); ls.set("nova_talk", !talk); if (talk) v.stopSpeaking(); }} title={talk ? "Mute voice" : "Unmute voice"}>{talk ? "🔊" : "🔇"}</button>
           <button className="icon" onClick={() => openSheet("voice")} title="Settings">⚙</button>
         </div>
       </header>
-      {err && <div className="banner bad" onClick={() => setErr("")}>{err} <b>✕</b></div>}
-      {!err && health && !brainOk && <div className="banner bad" onClick={() => openSheet("system")}>AI brain offline — {brains.map(([k, x]) => `${k}: ${x}`).join(" · ") || "no keys"}. Tap for details.</div>}
-      {confirm && <div className="banner ask"><span>{confirm.label}</span><span className="row">
+      <div className="banners">
+        {err && <div className="banner bad" onClick={() => setErr("")}>{err} <b>✕</b></div>}
+        {!err && health && !brainOk && <div className="banner bad" onClick={() => openSheet("system")}>AI brain offline — {brains.map(([k, x]) => `${k}: ${x}`).join(" · ") || "no keys"}. Tap for details.</div>}
+        {confirm && <div className="banner ask"><span>{confirm.label}</span><span className="row">
         <button className="primary" onClick={() => { const c = confirm; setConfirm(null); c.run(); }}>Yes</button><button onClick={() => setConfirm(null)}>No</button></span></div>}
 
+      </div>
       <section className="grid">
         {/* ───── Missions ───── */}
         <aside className={`side ${vis("missions")}`}>

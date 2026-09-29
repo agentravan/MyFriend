@@ -34,6 +34,7 @@ input:focus, select:focus { outline: none; border-color: rgba(94,224,255,.55); }
 .clock { font-variant-numeric: tabular-nums; color: var(--muted); font-size: 14px; margin-right: 6px; }
 .chip-btn { font-size: 13px; padding: 6px 12px; border-radius: 99px; } .chip-btn.on { background: rgba(255,180,84,.14); border-color: rgba(255,180,84,.45); color: var(--warm); }
 .tag-ok { font-size: 15px; }
+.banners { display: flex; flex-direction: column; min-height: 0; } /* always present: keeps the grid rows stable */
 .banner { display: flex; justify-content: space-between; align-items: center; gap: 12px; padding: 10px 14px; border-radius: 12px; margin-bottom: 12px; font-size: 14px; cursor: pointer; }
 .banner.bad { background: rgba(255,107,129,.08); border: 1px solid rgba(255,107,129,.3); color: #ffc2cc; }
 .banner.ask { background: rgba(255,180,84,.08); border: 1px solid rgba(255,180,84,.35); cursor: default; } .banner.ask button { padding: 6px 14px; }
@@ -165,5 +166,6 @@ details summary { cursor: pointer; color: var(--muted); font-size: 13px; }
   .tabs button span { font-size: 18px; } .tabs button.on { color: var(--accent); }
   .tabs em { position: absolute; top: 0; right: 28%; background: var(--warm); color: #000; font: 700 10px Inter; border-radius: 99px; padding: 0 5px; font-style: normal; }
 }
-@media (max-width: 420px) { .top-r .chip-btn { padding: 6px 9px; } .pill { font-size: 11.5px; padding: 4px 10px; } }
+@media (max-width: 960px) { .top { grid-template-columns: auto 1fr auto; gap: 8px; } .top > * { min-width: 0; } .pill { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 100%; } }
+@media (max-width: 420px) { .top-r { gap: 2px; } .top-r .chip-btn { padding: 6px 9px; } .icon { padding: 6px 7px; } .pill { font-size: 11.5px; padding: 4px 10px; } .logo { font-size: 16px; letter-spacing: .16em; } }
 @media (prefers-reduced-motion: reduce) { *, *::before, *::after { animation: none !important; transition: none !important; } }
