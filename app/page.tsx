@@ -69,24 +69,37 @@ export default function Home() {
   const phoneOp = useCallback((op: string, extra: object = {}) => run({ action: "phone", op, ...extra }), [run]);
 
   // ── Commands: pending yes/no → mission → chat/action planner
-  const send = useCallback(async (text: string) => {
+  const startMission = useCallback(async (goal: string) => {
+    setBusy(true);
+    const j = await run({ action: "create", goal, file: attach ?? undefined }, "/api/tasks");
+    setAttach(null); setBusy(false); if (j) say(j.reply ?? "Sure Boss, I'm on it.");
+  }, [run, attach, say]);
+
+  const send = useCallback(async (text: string, fromVoice = false) => {
     text = text.trim(); if (!text && !attach) return;
     setInput("");
     const c = confirmRef.current;
     if (c && YES.test(text)) { setConfirm(null); c.run(); say("Done, Boss."); return; }
     if (c && NO.test(text)) { setConfirm(null); say("Theek hai, cancel kar diya."); return; }
-    setBusy(true); setView("nova");
+    setView("nova");
     if (attach || mission) {
+      const goal = text || `Summarize and analyze the attached file ${attach?.name}`;
       setS((p) => p && { ...p, messages: [...p.messages, { role: "user", content: text || `📎 ${attach?.name}`, id: Date.now() }] });
-      const j = await run({ action: "create", goal: text || `Summarize and analyze the attached file ${attach?.name}`, file: attach ?? undefined }, "/api/tasks");
-      setAttach(null); setBusy(false); if (j) say(j.reply ?? "Sure Boss, I'm on it."); return;
+      if (fromVoice) { // spoken missions are confirmed first — misheard speech must not start work
+        setConfirm({ label: `Start mission: “${goal}”?`, run: () => startMission(goal) });
+        say(`Mission: ${goal}. Start karun, Boss?`); return;
+      }
+      return startMission(goal);
     }
+    setBusy(true);
     setS((p) => p && { ...p, messages: [...p.messages, { role: "user", content: text, id: Date.now() }] });
-    const j = await run({ action: "chat", text });
+    const j = await run({ action: "chat", text, voice: fromVoice });
     setBusy(false); if (!j) return;
     if (j.card) { setCard(j.card); setChecks([]); setThesis(""); setSheet("markets"); }
     const acts: Action[] = j.actions ?? [];
     for (const a of acts) if (a.kind === "timer") setTimers((t) => [...t, { id: Date.now() + Math.random(), label: a.label || "Timer", end: Date.now() + a.seconds * 1000 }]);
+    const pendingTask = acts.find((a) => a.kind === "task" && via(a) === "confirm");
+    if (pendingTask && pendingTask.kind === "task") setConfirm({ label: `Start mission: “${pendingTask.goal}”?`, run: () => startMission(pendingTask.goal) });
     const sms = acts.find((a) => via(a) === "phone-confirm");
     if (sms && sms.kind === "sms") setConfirm({ label: `Send SMS to ${sms.name ?? sms.phone}: “${sms.text}”`, run: () => phoneOp("sms", { number: sms.phone, text: sms.text, name: sms.name }) });
     const ext = acts.find((a) => !INTERNAL.has(a.kind) && !via(a) && !(a.kind === "call" && !a.phone));
@@ -94,9 +107,9 @@ export default function Home() {
     if (ext && !auto) setConfirm({ label: "Open it?", run: () => launch(ext) });
     setLive(acts.length ? { actions: acts, auto, key: Date.now() } : null);
     if (j.reply) say(j.reply);
-  }, [run, direct, say, attach, mission, phoneOp]);
+  }, [run, direct, say, attach, mission, phoneOp, startMission]);
 
-  const v = useJarvisVoice(send, prefs);
+  const v = useJarvisVoice((t) => send(t, true), prefs);
   speakRef.current = v.speak;
   const mic = useMicLevel(v.mode === "sleeping" || v.mode === "awake");
   const level = useRef(0); // one stable ref for the core: NOVA's voice while speaking, your mic otherwise
@@ -335,6 +348,9 @@ export default function Home() {
                 <label className="toggle"><input type="checkbox" checked={prefs.neural} onChange={(e) => savePrefs({ ...prefs, neural: e.target.checked })} />
                   <span><b>NOVA Neural voice</b><small>Natural AI voice via your Gemini key. Falls back to the device voice automatically.</small></span></label>
                 {prefs.neural && <div className="seg">{NEURAL.map((n) => <button key={n} className={prefs.neuralVoice === n ? "on" : ""} onClick={() => savePrefs({ ...prefs, neuralVoice: n })}>{n}</button>)}</div>}
+                <label className="field-l">I speak in
+                  <div className="seg">{([["en-IN", "Hinglish / English (recommended)"], ["hi-IN", "Mostly Hindi"]] as const).map(([k, l]) =>
+                    <button key={k} className={(prefs.lang ?? "en-IN") === k ? "on" : ""} onClick={() => savePrefs({ ...prefs, lang: k })}>{l}</button>)}</div></label>
                 <label className="field-l">Device voice (FRIDAY-style fallback)
                   <select value={prefs.deviceVoice} onChange={(e) => savePrefs({ ...prefs, deviceVoice: e.target.value })}>
                     <option value="">Auto — best female voice ({pickVoice(v.voices)?.name ?? "…"})</option>

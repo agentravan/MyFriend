@@ -39,9 +39,9 @@ export default function ActionCard({ a, auto, onContact, onPhoneSend }: {
     } catch { /* cancelled */ }
   }
 
-  const label = via(act) === "phone" ? "DONE ON YOUR PHONE" : internal ? "DONE" : state === "done" ? "OPENED" : via(act) === "phone-confirm" ? "SAY “HAAN, BHEJ DO” OR TAP" : "READY";
+  const label = via(act) === "confirm" ? "SAY “HAAN” TO START" : via(act) === "phone" ? "DONE ON YOUR PHONE" : internal ? "DONE" : state === "done" ? "OPENED" : via(act) === "phone-confirm" ? "SAY “HAAN, BHEJ DO” OR TAP" : "READY";
   return (
-    <div className={`act ${internal || state === "done" ? "ok" : ""}`}>
+    <div className={`act ${(internal || state === "done") && via(act) !== "confirm" ? "ok" : ""}`}>
       <span className="act-ic">{ICON[act.kind] ?? "•"}</span>
       <div className="act-body"><small>{label}</small><p>{describe(act)}</p></div>
       {!internal && (via(act) === "phone-confirm"

@@ -23,7 +23,7 @@ const R = {
   act: /(open|khol|call|phone|whatsapp|message|msg|bhej|send|play|chala|laga|set|timer|alarm|remind|yaad dila|navigate|rasta|le chalo|search|dhoondh|save|number)/i,
 };
 
-async function handle(text: string) {
+async function handle(text: string, voice = false) {
   // 1) Memory
   if (has(R.remember, text)) {
     const fact = text.replace(/.*?(remember that|remember:|yaad rakhna|yaad rakho|yaad rakh|याद रखना|याद रखो|याद रख)\s*(ki|कि)?/i, "").trim() || text;
@@ -72,7 +72,9 @@ async function handle(text: string) {
   const hist = histRows.reverse().map((x) => ({ role: x.role, content: x.content })) as Msg[];
   const ctx = privateCtx + (contacts.length ? `\nSAVED CONTACT NAMES: ${contacts.map((c) => c.name).join(", ")}` : "");
   const { reply, actions, provider } = await plan(text, hist, system, ctx);
-  const extra = await execServer(actions);
+  const extra = await execServer(actions, { voice });
+  const pending = actions.find((a) => a.kind === "task" && (a as { via?: string }).via === "confirm");
+  if (pending && pending.kind === "task") return { reply: `Mission: ${pending.goal}. Start karun, Boss?`, actions, provider };
   const weatherOnly = actions.length > 0 && actions.every((a) => a.kind === "weather");
   return { reply: weatherOnly ? extra : [reply, extra].filter(Boolean).join(" "), actions, provider };
 }
@@ -95,7 +97,7 @@ export async function POST(req: Request) {
         const text = String(b.text ?? "").slice(0, 1500).trim();
         if (!text) break;
         await ins("messages", { role: "user", content: text });
-        out = await handle(text);
+        out = await handle(text, !!b.voice);
         await ins("messages", { role: "assistant", content: String(out.reply) });
         break;
       }

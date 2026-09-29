@@ -5,7 +5,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 
 export type VoiceMode = "off" | "sleeping" | "awake" | "speaking";
-export type VoicePrefs = { neural: boolean; neuralVoice: string; deviceVoice: string; rate: number };
+export type VoicePrefs = { neural: boolean; neuralVoice: string; deviceVoice: string; rate: number; lang?: "en-IN" | "hi-IN" };
 const WAKE = /(^|[\s,.!?])(nova|novaa|nowa|नोवा|नोवाह|नोबा|नोव)(?=$|[\s,.!?])/i;
 // FRIDAY used Windows voices[1] = "Microsoft Zira" (female). Prefer natural female voices first.
 const FEMALE = [/Neerja/i, /Swara/i, /Heera/i, /Zira/i, /Google हिन्दी/i, /Google UK English Female/i, /Aria|Jenny|Sonia|Libby/i, /Samantha|Veena|Lekha/i, /female/i];
@@ -26,7 +26,9 @@ export function greeting() {
   return `${part}. This is NOVA. How may I help you?`;
 }
 
-export function useJarvisVoice(onCommand: (text: string) => void, prefs: VoicePrefs, { lang = "hi-IN", awakeMs = 20000 } = {}) {
+export function useJarvisVoice(onCommand: (text: string) => void, prefs: VoicePrefs, { awakeMs = 20000 } = {}) {
+  // en-IN writes Hinglish in Roman script and keeps English words intact ("manufacturing", not "मीना फ्रैक्चर").
+  const lang = prefs.lang ?? "en-IN";
   const [mode, setMode] = useState<VoiceMode>("off");
   const [interim, setInterim] = useState("");
   const [supported, setSupported] = useState(true);
@@ -59,6 +61,7 @@ export function useJarvisVoice(onCommand: (text: string) => void, prefs: VoicePr
       if (cmd.length > 1) { setInterim(""); awakeUntil.current = Date.now() + awakeMs; cb.current(cmd); } else wake();
     };
     r.onend = () => { if (armed.current && !speaking.current) listen(); };
+    if (armed.current) setTimeout(listen, 200); // language switched while listening → resume
     r.onerror = (e: Any) => { if (e.error === "not-allowed" || e.error === "service-not-allowed") { armed.current = false; setMode("off"); } };
     rec.current = r;
     const tick = setInterval(() => { if (armed.current && !speaking.current) setMode(Date.now() < awakeUntil.current ? "awake" : "sleeping"); }, 400);

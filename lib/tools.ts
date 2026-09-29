@@ -63,7 +63,7 @@ export async function weather(place: string) {
 }
 
 /** Resolve names → numbers from saved contacts, persist internal actions. Returns extra reply text. */
-export async function execServer(actions: Action[]) {
+export async function execServer(actions: Action[], opt: { voice?: boolean } = {}) {
   const notes: string[] = [];
   const linked = !!(await setting("phone_webhook").catch(() => undefined));
   for (const a of actions) {
@@ -84,7 +84,10 @@ export async function execServer(actions: Action[]) {
     if (a.kind === "note") await ins("memory", { fact: a.text });
     if (a.kind === "save_contact") await ins("contacts", { name: a.name, phone: a.phone.replace(/[^\d+]/g, "") }).catch(() => notes.push(`${a.name} pehle se saved hai.`));
     if (a.kind === "reminder") await ins("reminders", { text: a.text, due_at: a.due_at });
-    if (a.kind === "task") { const t = await createTask(a.goal); (a as { id?: number }).id = t.id; }
+    if (a.kind === "task") {
+      if (opt.voice) tag.via = "confirm"; // spoken → Boss confirms before any work starts
+      else { const t = await createTask(a.goal); (a as { id?: number }).id = t.id; }
+    }
     if (a.kind === "weather") notes.push(await weather(a.place || "Gurugram").catch(() => "Weather service abhi respond nahi kar rahi."));
   }
   if (actions.length) await ins("actions", actions.map((a) => ({ kind: a.kind, payload: a }))).catch(() => null);

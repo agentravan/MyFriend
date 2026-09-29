@@ -2,7 +2,7 @@
 // Each tick runs ONE step (fits serverless time limits). Ticks come from the open app and from Supabase pg_cron.
 import { llm, parseJSON } from "@/lib/llm";
 import { ins, sel, upd, Row } from "@/lib/db";
-import { read, search } from "@/lib/web";
+import { read, search, Hit } from "@/lib/web";
 import { persona } from "@/lib/nova";
 
 export const AGENTS = ["research", "business", "hr", "data", "coding", "testing", "document", "communication", "manual"] as const;
@@ -23,6 +23,7 @@ Agents: research (web search + read pages + notes with sources), business (strat
 data (structured tables → CSV file), coding (build ONE self-contained HTML app/dashboard/website file), testing (verify & fix the last built file),
 document (write a polished report/proposal/plan → HTML + Markdown files), communication (draft emails/WhatsApp/LinkedIn messages — never sends),
 manual (ONLY for things NOVA truly cannot do: OTP, login, CAPTCHA, payments, sending from the user's own accounts, physical actions; and only if a LATER step depends on it).
+For finding clients/leads: research (find real businesses via directories, lists, news) → research (their official websites/contact pages) → data (CSV lead sheet) → communication (personalised outreach drafts) → document (summary + how to approach).
 Rules: 3–7 steps. Prefer automatic steps. After every coding step add a testing step. Put research before building/writing when facts are needed.
 Every step's instruction must be specific and self-contained. Assume India / INR / Hinglish-friendly unless told otherwise.
 Output ONLY JSON: {"title":"<short task title>","kind":"research|build|leads|document|analysis|general","steps":[{"agent":"...","title":"<5-8 words>","instruction":"..."}]}`;
@@ -56,26 +57,38 @@ const context = (c: Ctx) =>
 const slug = (s: string) => s.toLowerCase().replace(/[^a-z0-9]+/g, "-").slice(0, 36).replace(/^-+|-+$/g, "") || "nova";
 
 async function research(c: Ctx): Promise<Out> {
-  const { text } = await llm({ system: "You write web search queries. Output JSON only.", json: true, maxTokens: 200, prefer: "fast", strict: true,
-    msgs: [{ role: "user", content: `${context(c)}\n\nWrite 3 precise web search queries (India-focused if relevant). JSON: {"queries":["..."]}` }] });
-  const queries = parseJSON<{ queries?: string[] }>(text, {}).queries?.slice(0, 3) ?? [c.step.title];
-  const results = (await Promise.all(queries.map((q) => search(q, 6)))).flat();
-  const seen = new Set<string>(), hits = results.filter((h) => !h.url || (!seen.has(h.url) && seen.add(h.url)));
-  const pages = await Promise.all(hits.filter((h) => h.url).slice(0, 4).map(async (h) => ({ ...h, body: await read(h.url, 3500) })));
-  const answers = hits.filter((h) => !h.url);
+  const leads = /client|lead|prospect|customer|compan|business|contact|vendor|supplier|firm|agenc/i.test(c.step.instruction + c.task.goal);
+  const ask = async (prompt: string) => parseJSON<{ queries?: string[] }>((await llm({ system: "You write precise web search queries. Output JSON only.", json: true,
+    maxTokens: 300, prefer: "fast", strict: true, msgs: [{ role: "user", content: prompt }] })).text, {}).queries?.slice(0, 4) ?? [];
+  const seen = new Set<string>(), hits: Hit[] = [], answers: Hit[] = [];
+  const gather = async (qs: string[]) => {
+    for (const h of (await Promise.all(qs.map((q) => search(q, 8)))).flat()) {
+      if (!h.url) answers.push(h); else if (!seen.has(h.url)) { seen.add(h.url); hits.push(h); }
+    }
+  };
+  // Round 1
+  const q1 = await ask(`${context(c)}\n\nWrite 4 web search queries (India-focused if relevant).${leads ? " Target real, specific businesses: directories (Justdial, IndiaMART, Clutch, LinkedIn company pages), 'list of … companies in <city>', industry associations, recent news of hiring/expansion." : ""} JSON: {"queries":["..."]}`);
+  await gather(q1.length ? q1 : [c.step.title]);
+  // Round 2: fill gaps found in round 1
+  const q2 = await ask(`${context(c)}\n\nRound-1 results (titles):\n${hits.slice(0, 20).map((h) => "- " + h.title).join("\n") || "(none)"}\n\nWrite up to 3 follow-up queries that fill the biggest gaps${leads ? " (e.g. specific company names + \"contact\", official websites, city-specific directories)" : ""}. JSON: {"queries":["..."]}`);
+  if (q2.length) await gather(q2);
+  // Read the best pages (Tavily already returns page text; others are fetched)
+  const pages = await Promise.all(hits.slice(0, 8).map(async (h) => ({ ...h, body: h.body || (await read(h.url, 3500)) })));
   const corpus = [
-    ...answers.map((a) => `[G] ${a.title}\n${a.snippet}`),
-    ...pages.map((p, i) => `[${i + 1}] ${p.title} — ${p.url}\n${p.body || p.snippet}`),
-    ...hits.filter((h) => h.url).slice(4, 14).map((h, i) => `[${i + 5}] ${h.title} — ${h.url}\n${h.snippet}`),
-  ].join("\n\n").slice(0, 16000);
-  if (!corpus) return { output: `Web search returned no results (${queries.join(" | ")}). Tip: add a free TAVILY_API_KEY in Vercel for full web search.` };
-  const { text: notes } = await llm({ system: c.system + "\nYou are NOVA's Research Agent. Use ONLY the sources given; cite as [n]. Never invent companies, numbers, emails or phone numbers.",
-    maxTokens: 2500, timeoutMs: 120000, strict: true, msgs: [{ role: "user", content: `${context(c)}\n\nSOURCES (web, fetched ${now().slice(0, 10)}):\n${corpus}\n\nWrite concise research notes that answer the instruction. End with a "Sources" list of [n] title — url.` }] });
+    ...answers.slice(0, 2).map((a) => `[G] ${a.title}\n${a.snippet}`),
+    ...pages.map((p, i) => `[${i + 1}] ${p.title} — ${p.url}\n${(p.body || p.snippet).slice(0, 2800)}`),
+    ...hits.slice(8, 24).map((h, i) => `[${i + 9}] ${h.title} — ${h.url}\n${h.snippet}`),
+  ].join("\n\n").slice(0, 26000);
+  if (!corpus) return { output: `Web search returned no results (${[...q1, ...q2].join(" | ")}). Check TAVILY_API_KEY in Vercel.` };
+  const { text: notes } = await llm({ system: c.system + "\nYou are NOVA's Research Agent. Use ONLY the sources given; cite as [n]. Never invent companies, people, numbers, emails or phone numbers. Output only the findings — no agent name, no meta commentary." +
+      (leads ? " For leads: list EVERY distinct real business found (aim for 15–30) as a table: Name | What they do | City | Website | Phone/Email (only if shown in the source) | Why relevant | Source [n]." : ""),
+    maxTokens: 3500, timeoutMs: 150000, strict: true,
+    msgs: [{ role: "user", content: `${context(c)}\n\nSOURCES (web, fetched ${now().slice(0, 10)}; ${hits.length} results from ${q1.length + q2.length} searches):\n${corpus}\n\nWrite concise research notes that answer the instruction. End with a "Sources" list of [n] title — url.` }] });
   return { output: notes };
 }
 
 async function think(c: Ctx, role: string): Promise<Out> {
-  const { text } = await llm({ system: `${c.system}\nYou are NOVA's ${AGENT_LABEL[c.step.agent]}. ${role} Be concrete and practical; use only facts from earlier steps for real-world claims.`,
+  const { text } = await llm({ system: `${c.system}\nYou are NOVA's ${AGENT_LABEL[c.step.agent]}. ${role} Be concrete and practical; use only facts from earlier steps for real-world claims. Output only the deliverable — no agent name heading, no meta commentary.`,
     maxTokens: 3000, timeoutMs: 120000, strict: true, msgs: [{ role: "user", content: context(c) }] });
   return { output: text };
 }
@@ -102,7 +115,7 @@ const md2html = (md: string, title: string) => {
 };
 
 async function document(c: Ctx): Promise<Out> {
-  const { text } = await llm({ system: `${c.system}\nYou are NOVA's Document Agent. Write a polished, well-structured Markdown document (# title, ## sections, bullet lists, tables where useful). Use only facts from earlier steps; keep source links.`,
+  const { text } = await llm({ system: `${c.system}\nYou are NOVA's Document Agent. Write a polished, well-structured Markdown document (# title, ## sections, bullet lists, tables where useful). Use only facts from earlier steps; keep source links. Start directly with "# <title>" — no agent name, no meta commentary. If earlier steps found little, still deliver the best useful document from what exists and add a short "Next steps" section.`,
     maxTokens: 5000, timeoutMs: 200000, prefer: "fast", strict: true, msgs: [{ role: "user", content: context(c) }] });
   const md = text.replace(/^\s*\*\*[^*\n]+\.(md|markdown)\*\*\s*$/gim, "").replace(/```(markdown|md)?\s*\n?/gi, "").trim();
   const title = md.match(/^# (.+)$/m)?.[1] ?? c.task.title, base = slug(title);

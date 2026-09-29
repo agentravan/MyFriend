@@ -1,16 +1,17 @@
 // Web tools for the Research Agent: search (Tavily/Brave if keyed, else DuckDuckGo HTML) + page reader (Jina, else raw).
 import { env, GEMINI_KEY, geminiRaw } from "@/lib/llm";
 
-export type Hit = { title: string; url: string; snippet: string };
+export type Hit = { title: string; url: string; snippet: string; body?: string };
 const UA = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126 Safari/537.36";
 const withTimeout = (ms: number) => { const c = new AbortController(); setTimeout(() => c.abort(), ms); return c.signal; };
 const strip = (h: string) => h.replace(/<[^>]+>/g, "").replace(/&amp;/g, "&").replace(/&quot;/g, '"').replace(/&#x27;|&#39;/g, "'").replace(/&lt;/g, "<").replace(/&gt;/g, ">").replace(/\s+/g, " ").trim();
 
 async function tavily(q: string, n: number): Promise<Hit[]> {
-  const r = await fetch("https://api.tavily.com/search", { method: "POST", signal: withTimeout(15000), headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ api_key: env("TAVILY_API_KEY"), query: q, max_results: n }) });
+  const r = await fetch("https://api.tavily.com/search", { method: "POST", signal: withTimeout(20000), headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ api_key: env("TAVILY_API_KEY"), query: q, max_results: n, include_raw_content: true, country: "india", topic: "general" }) });
   if (!r.ok) throw new Error(`tavily ${r.status}`);
-  return ((await r.json()).results ?? []).map((x: { title: string; url: string; content: string }) => ({ title: x.title, url: x.url, snippet: x.content?.slice(0, 300) ?? "" }));
+  return ((await r.json()).results ?? []).map((x: { title: string; url: string; content: string; raw_content?: string }) =>
+    ({ title: x.title, url: x.url, snippet: x.content?.slice(0, 400) ?? "", body: x.raw_content?.slice(0, 4000) }));
 }
 
 async function brave(q: string, n: number): Promise<Hit[]> {

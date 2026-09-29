@@ -59,7 +59,8 @@ input:focus, select:focus { outline: none; border-color: rgba(94,224,255,.55); }
 .modules button span { font-size: 17px; } .modules em { position: absolute; top: 4px; right: 8px; background: var(--warm); color: #000; font: 700 10px Inter; border-radius: 99px; padding: 0 5px; font-style: normal; }
 
 /* ── Centre ── */
-.main { display: grid; grid-template-rows: auto auto minmax(0, 1fr) auto; grid-template-columns: minmax(0, 1fr); gap: 12px; min-height: 0; min-width: 0; }
+.main { display: flex; flex-direction: column; gap: 12px; min-height: 0; min-width: 0; }
+.main > * { flex-shrink: 0; } .main > .feed { flex: 1 1 0; min-height: 60px; }
 .hero { display: flex; flex-direction: column; align-items: center; padding-top: 4px; }
 .core { cursor: pointer; width: min(200px, 24vh) !important; height: min(200px, 24vh) !important; }
 .heard { min-height: 21px; color: var(--warm); font-size: 14px; text-align: center; }
