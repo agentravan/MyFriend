@@ -30,7 +30,7 @@ async function serper(q: string, n: number): Promise<Hit[]> {
 /** Google Search grounding through the user's free Gemini key: real Google results + a grounded summary. */
 async function googleViaGemini(q: string, n: number): Promise<Hit[]> {
   const { text, raw } = await geminiRaw({ system: "Answer factually using Google Search. Be concise; list concrete names, prices and facts.", tools: [{ google_search: {} }],
-    msgs: [{ role: "user", content: q }], maxTokens: 900, timeoutMs: 30000 });
+    msgs: [{ role: "user", content: q }], maxTokens: 900, timeoutMs: 40000 });
   const cand = (raw.candidates as { groundingMetadata?: { groundingChunks?: { web?: { uri: string; title: string } }[] } }[] | undefined)?.[0];
   const chunks = cand?.groundingMetadata?.groundingChunks ?? [];
   const hits: Hit[] = chunks.filter((c) => c.web?.uri).slice(0, n).map((c) => ({ title: c.web!.title, url: c.web!.uri, snippet: "" }));
@@ -39,7 +39,8 @@ async function googleViaGemini(q: string, n: number): Promise<Hit[]> {
 }
 
 async function wikipedia(q: string, n: number): Promise<Hit[]> {
-  const r = await fetch(`https://en.wikipedia.org/w/api.php?action=query&list=search&format=json&srlimit=${n}&srsearch=${encodeURIComponent(q)}`,
+  const short = q.replace(/[^\p{L}\p{N}\s]/gu, " ").split(/\s+/).filter((w) => w.length > 2 && !/^(best|top|list|india|indian|price|pricing|cost|2023|2024|2025|2026)$/i.test(w)).slice(0, 4).join(" ") || q;
+  const r = await fetch(`https://en.wikipedia.org/w/api.php?action=query&list=search&format=json&srlimit=${n}&srsearch=${encodeURIComponent(short)}`,
     { signal: withTimeout(10000), headers: { "User-Agent": "NOVA-personal-assistant/1.0" } });
   if (!r.ok) throw new Error(`wikipedia ${r.status}`);
   return ((await r.json()).query?.search ?? []).map((x: { title: string; snippet: string }) =>

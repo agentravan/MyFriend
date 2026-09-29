@@ -53,7 +53,7 @@ const context = (c: Ctx) =>
   (c.task.attachment ? `\nATTACHED FILE:\n${String(c.task.attachment).slice(0, 12000)}\n` : "") +
   (c.prior ? `\nRESULTS FROM EARLIER STEPS:\n${c.prior}` : "");
 
-const slug = (s: string) => s.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "").slice(0, 40) || "nova";
+const slug = (s: string) => s.toLowerCase().replace(/[^a-z0-9]+/g, "-").slice(0, 36).replace(/^-+|-+$/g, "") || "nova";
 
 async function research(c: Ctx): Promise<Out> {
   const { text } = await llm({ system: "You write web search queries. Output JSON only.", json: true, maxTokens: 200, prefer: "fast", strict: true,
@@ -86,7 +86,7 @@ async function data(c: Ctx): Promise<Out> {
   const csv = text.replace(/```(csv)?/g, "").trim();
   const rows = csv.split("\n").length - 1;
   return { output: `Built a table with ${rows} rows.\n\n${csv.split("\n").slice(0, 8).join("\n")}${rows > 7 ? "\n…" : ""}`,
-    files: [{ name: `${slug(c.task.title)}-${slug(c.step.title)}.csv`, mime: "text/csv", content: csv }] };
+    files: [{ name: `${slug(c.task.title)}-table.csv`, mime: "text/csv", content: csv }] };
 }
 
 const md2html = (md: string, title: string) => {
@@ -104,9 +104,10 @@ const md2html = (md: string, title: string) => {
 async function document(c: Ctx): Promise<Out> {
   const { text } = await llm({ system: `${c.system}\nYou are NOVA's Document Agent. Write a polished, well-structured Markdown document (# title, ## sections, bullet lists, tables where useful). Use only facts from earlier steps; keep source links.`,
     maxTokens: 3000, timeoutMs: 150000, prefer: "fast", strict: true, msgs: [{ role: "user", content: context(c) }] });
-  const title = text.match(/^# (.+)$/m)?.[1] ?? c.step.title, base = slug(title);
-  return { output: text.slice(0, 1500) + (text.length > 1500 ? "\n…" : ""),
-    files: [{ name: `${base}.html`, mime: "text/html", content: md2html(text, title) }, { name: `${base}.md`, mime: "text/markdown", content: text }] };
+  const md = text.replace(/^\s*\*\*[^*\n]+\.(md|markdown)\*\*\s*$/gim, "").replace(/```(markdown|md)?\s*\n?/gi, "").trim();
+  const title = md.match(/^# (.+)$/m)?.[1] ?? c.step.title, base = slug(title);
+  return { output: md.slice(0, 1500) + (md.length > 1500 ? "\n…" : ""),
+    files: [{ name: `${base}.html`, mime: "text/html", content: md2html(md, title) }, { name: `${base}.md`, mime: "text/markdown", content: md }] };
 }
 
 const CODER = `You are NOVA's Coding Agent. Build ONE complete, self-contained HTML file (inline CSS + JS).

@@ -66,6 +66,7 @@ async function openaiCompat(p: P, o: Opts) {
     if (r.status === 404 || r.status === 410 || ((r.status === 400 || r.status === 422) && /model/i.test(body))) {
       badModels.add(`${p.name}:${model}`); chosen.delete(p.name); continue; // retired model → try the next one
     }
+    if ((r.status === 429 || r.status >= 500) && attempt < 2) { await new Promise((w) => setTimeout(w, 1500)); continue; } // busy → brief retry
     throw new Error(`${p.name} ${r.status}`);
   }
   throw new Error(`${p.name}: models unavailable`);
@@ -89,7 +90,7 @@ async function pickGemini() {
   return geminiModel;
 }
 
-async function gemini(o: Opts & { tools?: object[] }): Promise<{ text: string; raw: Record<string, unknown> }> {
+async function gemini(o: Opts & { tools?: object[] }, retry = true): Promise<{ text: string; raw: Record<string, unknown> }> {
   const model = await pickGemini();
   const r = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent`, {
     method: "POST", signal: AbortSignal.timeout(o.timeoutMs ?? 30000),
@@ -103,6 +104,7 @@ async function gemini(o: Opts & { tools?: object[] }): Promise<{ text: string; r
   });
   if (!r.ok) {
     if (r.status === 404 || r.status === 429) { badGemini.add(model); geminiModel = undefined; }
+    if (retry && (r.status >= 500 || r.status === 404 || r.status === 429)) { await new Promise((w) => setTimeout(w, 1200)); return gemini(o, false); }
     throw new Error(r.status === 400 || r.status === 403 ? `gemini: key rejected (${r.status})` : `gemini ${r.status}`);
   }
   const j = await r.json();
