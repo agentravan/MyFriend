@@ -60,8 +60,9 @@ async function research(c: Ctx): Promise<Out> {
     msgs: [{ role: "user", content: `${context(c)}\n\nWrite 3 precise web search queries (India-focused if relevant). JSON: {"queries":["..."]}` }] });
   const queries = parseJSON<{ queries?: string[] }>(text, {}).queries?.slice(0, 3) ?? [c.step.title];
   const results = (await Promise.all(queries.map((q) => search(q, 6)))).flat();
-  const seen = new Set<string>(), hits = results.filter((h) => !seen.has(h.url) && seen.add(h.url));
-  const pages = await Promise.all(hits.slice(0, 4).map(async (h) => ({ ...h, body: await read(h.url, 3500) })));
+  const seen = new Set<string>(), hits = results.filter((h) => !h.url || (!seen.has(h.url) && seen.add(h.url)));
+  const pages = await Promise.all(hits.filter((h) => h.url).slice(0, 4).map(async (h) => ({ ...h, body: await read(h.url, 3500) })));
+  const answers = hits.filter((h) => !h.url);
   const corpus = [
     ...answers.map((a) => `[G] ${a.title}\n${a.snippet}`),
     ...pages.map((p, i) => `[${i + 1}] ${p.title} — ${p.url}\n${p.body || p.snippet}`),
