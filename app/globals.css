@@ -80,7 +80,7 @@ details summary { cursor: pointer; color: var(--dim); font-size: 13px; margin: 6
 .center-row { justify-content: center; }
 .arm { border-radius: 99px; padding: 8px 16px; } .arm.on { border-color: var(--amber); color: var(--amber); box-shadow: 0 0 16px rgba(255,182,39,.25); }
 
-.feed { max-height: 44vh; min-height: 220px; overflow-y: auto; display: flex; flex-direction: column; gap: 10px; scroll-behavior: smooth; }
+.feed { max-height: max(220px, calc(100vh - 500px)); min-height: 200px; overflow-y: auto; display: flex; flex-direction: column; gap: 10px; scroll-behavior: smooth; }
 .hello { color: var(--dim); text-align: center; padding: 20px 10px; } .hello b { color: var(--cyan); display: block; font-family: Orbitron; font-size: 13px; margin-bottom: 4px; }
 .msg { padding: 9px 13px; border-radius: 14px; max-width: 90%; white-space: pre-wrap; animation: rise .25s ease-out; }
 .msg.user { align-self: flex-end; background: linear-gradient(135deg, rgba(0,229,255,.16), rgba(0,229,255,.06)); border: 1px solid var(--line2); border-bottom-right-radius: 4px; }
@@ -142,7 +142,11 @@ details summary { cursor: pointer; color: var(--dim); font-size: 13px; margin: 6
   .center { display: flex !important; flex-direction: column; }
   .hide-m { display: none !important; }
   .brand em, .clock { display: none; }
-  .feed { max-height: none; min-height: 180px; }
+  .feed { max-height: 42vh; min-height: 160px; }
+  .core { width: 190px !important; height: 190px !important; }
+  .ask { position: sticky; bottom: calc(66px + env(safe-area-inset-bottom)); z-index: 15; background: rgba(2,8,14,.9); padding: 6px 0; }
+  .chips { position: sticky; bottom: calc(122px + env(safe-area-inset-bottom)); z-index: 15; background: rgba(2,8,14,.9); padding: 6px 0 2px; }
+  .top { padding-bottom: 8px; margin-bottom: 8px; } .top-mid .chip:not(.live):not(.warn) { display: none; }
   .tabs { display: flex; position: fixed; bottom: 0; left: 0; right: 0; z-index: 20; background: rgba(2,8,14,.92); backdrop-filter: blur(12px); border-top: 1px solid var(--line); padding: 6px 4px calc(6px + env(safe-area-inset-bottom)); }
   .tabs button { flex: 1; border: 0; background: none; font-size: 9.5px; color: var(--dim); display: flex; flex-direction: column; align-items: center; gap: 2px; position: relative; padding: 4px 0; }
   .tabs button span { font-size: 18px; font-family: system-ui; } .tabs button.on { color: var(--cyan); text-shadow: 0 0 10px var(--cyan); }

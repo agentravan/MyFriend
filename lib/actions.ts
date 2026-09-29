@@ -102,8 +102,8 @@ export function describe(a: Action): string {
 /** Server-side validation: keep only whitelisted, well-formed actions. */
 export function sanitize(raw: unknown): Action[] {
   if (!Array.isArray(raw)) return [];
-  return raw.slice(0, 3).filter((a): a is Action =>
+  return raw.filter((a): a is Action =>
     !!a && typeof a === "object" && (KINDS as readonly string[]).includes((a as Action).kind)
     && !((a as Action).kind === "open_url" && !/^https:\/\//.test((a as { url?: string }).url ?? ""))
-    && !((a as Action).kind === "timer" && !((a as { seconds?: number }).seconds! > 0)));
+    && !((a as Action).kind === "timer" && !((a as { seconds?: number }).seconds! > 0))).slice(0, 3);
 }
