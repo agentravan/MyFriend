@@ -73,8 +73,9 @@ input:focus { outline: none; border-color: var(--cyan); box-shadow: 0 0 0 3px rg
 .dock button span { font-size: 17px; color: var(--cyan); font-family: system-ui; } .dock em { position: absolute; top: 3px; right: 6px; background: var(--amber); color: #000; border-radius: 99px; font: 700 10px system-ui; padding: 0 5px; }
 
 /* ── Center stage ── */
-.center { display: grid; grid-template-rows: minmax(0, 1fr) auto auto auto; gap: 10px; min-height: 0; }
-.stage { position: relative; display: flex; flex-direction: column; align-items: center; justify-content: center; min-height: 0; }
+.center { display: grid; grid-template-rows: minmax(0, 1fr) auto auto auto; grid-template-columns: minmax(0, 1fr); gap: 10px; min-height: 0; min-width: 0; }
+.center > * { min-width: 0; }
+.stage { position: relative; display: flex; flex-direction: column; align-items: center; justify-content: center; min-height: 0; overflow: hidden; }
 .halo { position: absolute; width: min(420px, 90%); aspect-ratio: 1; border-radius: 50%; border: 1px dashed rgba(64,214,255,.18); animation: spin 60s linear infinite; }
 .halo::before { content: ""; position: absolute; inset: 22px; border-radius: 50%; border: 2px solid transparent; border-top-color: rgba(255,154,46,.5); border-left-color: rgba(64,214,255,.35); animation: spin 9s linear infinite reverse; }
 .core { cursor: pointer; width: min(250px, 32vh) !important; height: min(250px, 32vh) !important; filter: drop-shadow(0 0 26px rgba(64,214,255,.25)); position: relative; }
@@ -179,7 +180,7 @@ details summary { cursor: pointer; color: var(--dim); font-size: 13px; } .diff {
   .deck { grid-template-columns: minmax(0, 1fr); padding-top: 8px; }
   .m-hide { display: none !important; }
   .rail { min-height: 0; overflow: hidden; }
-  .core { width: min(190px, 26vh) !important; height: min(190px, 26vh) !important; } .halo { width: min(280px, 80%); }
+  .core { width: min(190px, 22vh) !important; height: min(190px, 22vh) !important; } .halo { width: min(260px, 36vh); }
   .says { max-height: 20vh; }
   .tabs { display: flex; position: fixed; bottom: 0; left: 0; right: 0; z-index: 30; background: rgba(2,8,14,.94); backdrop-filter: blur(12px); border-top: 1px solid var(--line); padding: 6px 4px calc(6px + env(safe-area-inset-bottom)); }
   .tabs button { flex: 1; border: 0; background: none; font-size: 9.5px; color: var(--dim); display: flex; flex-direction: column; align-items: center; gap: 2px; position: relative; padding: 4px 0; }
