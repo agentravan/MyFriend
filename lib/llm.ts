@@ -181,6 +181,26 @@ export async function speakNeural(text: string, voice = "Kore"): Promise<Buffer>
   return wav(Buffer.from(part.inlineData.data, "base64"), rate);
 }
 
+/** Operator diagnostics: how a model returns reasoning under different "thinking off" switches. */
+export async function probeThinking(model = "nvidia/nemotron-3-super-120b-a12b") {
+  const p = OPENAI_COMPAT[0], out: Record<string, unknown> = {};
+  const variants: [string, object, string][] = [
+    ["default", {}, "You are helpful."],
+    ["kwargs_enable_thinking_false", { chat_template_kwargs: { enable_thinking: false } }, "You are helpful."],
+    ["kwargs_thinking_false", { chat_template_kwargs: { thinking: false } }, "You are helpful."],
+    ["system_no_think", {}, "/no_think You are helpful."],
+    ["reasoning_effort_low", { reasoning_effort: "low" }, "You are helpful."],
+  ];
+  await Promise.all(variants.map(async ([k, extra, sys]) => { const t = Date.now();
+    try {
+      const r = await fetch(`${p.base}/chat/completions`, { method: "POST", signal: AbortSignal.timeout(60000), headers: { Authorization: `Bearer ${p.key()}`, "Content-Type": "application/json" },
+        body: JSON.stringify({ model, max_tokens: 400, messages: [{ role: "system", content: sys }, { role: "user", content: "List 3 Indian cities as a markdown table with one column. Only the table." }], ...extra }) });
+      const j = await r.json(); const m = j.choices?.[0]?.message ?? {};
+      out[k] = { status: r.status, ms: Date.now() - t, keys: Object.keys(m), content: String(m.content ?? j.error?.message ?? JSON.stringify(j).slice(0, 200)).slice(0, 260), reasoning: String(m.reasoning_content ?? m.reasoning ?? "").slice(0, 80) };
+    } catch (e) { out[k] = String(e); } }));
+  return out;
+}
+
 /** Operator diagnostics: time a tiny call against each candidate model of a provider. */
 export async function probe(name: string) {
   const out: Record<string, string> = {};
