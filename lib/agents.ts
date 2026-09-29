@@ -105,11 +105,16 @@ async function think(c: Ctx, role: string): Promise<Out> {
 }
 
 async function data(c: Ctx): Promise<Out> {
-  const { text } = await llm({ system: `You are NOVA's Data Agent. Produce ONE CSV table only (header row first, comma-separated, quote fields containing commas). No prose, no code fences. Include EVERY row found in the earlier steps — do not drop any. Use only facts present in the context; leave unknown cells completely EMPTY (never write "Not available" or "N/A"). Never invent emails or phone numbers. Merge info about the same organisation from different steps into one row.`,
-    maxTokens: 4500, timeoutMs: 120000, prefer: "fast", strict: true, msgs: [{ role: "user", content: context(c) }] });
-  const csv = text.replace(/```(csv)?/g, "").trim();
-  const rows = csv.split("\n").length - 1;
-  return { output: `Built a table with ${rows} rows.\n\n${csv.split("\n").slice(0, 8).join("\n")}${rows > 7 ? "\n…" : ""}`,
+  // The model returns structured rows; CSV is built in code so quoting is always correct (addresses contain commas).
+  const { text } = await llm({ system: `You are NOVA's Data Agent. Output ONLY JSON: {"columns":["..."],"rows":[["..."]]}. Include EVERY record found in the earlier steps — do not drop any; merge duplicates of the same organisation. Use only facts present in the context; unknown cells are "" (never "Not available"/"N/A"). Never invent emails or phone numbers.`,
+    json: true, maxTokens: 6000, timeoutMs: 150000, prefer: "fast", strict: true, msgs: [{ role: "user", content: context(c) }] });
+  const t = parseJSON<{ columns?: string[]; rows?: unknown[][] }>(text, {});
+  const cols = t.columns?.length ? t.columns : [];
+  const rows = (t.rows ?? []).filter((r) => Array.isArray(r) && r.some((v) => String(v ?? "").trim()));
+  if (!cols.length || !rows.length) throw new Error("Data Agent returned no table");
+  const cell = (v: unknown) => { const x = String(v ?? "").replace(/^(not (available|shown)( in source)?|n\/a|-|–)$/i, "").trim(); return /[",\n]/.test(x) ? `"${x.replace(/"/g, '""')}"` : x; };
+  const csv = "\uFEFF" + [cols, ...rows.map((r) => cols.map((_, i) => r[i]))].map((r) => r.map(cell).join(",")).join("\r\n");
+  return { output: `Built a table with ${rows.length} rows and ${cols.length} columns: ${cols.join(", ")}.`,
     files: [{ name: `${slug(c.task.title)}-table.csv`, mime: "text/csv", content: csv }] };
 }
 
