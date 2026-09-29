@@ -8,6 +8,7 @@ A cinematic, voice-first (Hinglish + English) personal AI that runs **free** on 
 |---|---|---|
 | Wake word “NOVA” + voice replies | ✅ | Browser Web Speech API (`hi-IN`), Chrome/Edge, tab open. Tap the reactor or **Alt+N** for a manual trigger. |
 | Brain | ✅ | NVIDIA NIM `meta/llama-3.3-70b-instruct` → Groq `llama-3.3-70b-versatile` → Gemini. Memory/ledger/contacts never go to Gemini. |
+| **Autonomous task engine** | ✅ | Say a goal (“find clients for my payroll work”, “build an HR dashboard”). The Orchestrator plans steps for Research, Business, HR, Data, Coding, Testing, Document and Communication agents, runs them one per tick (from the open app **and** every minute via Supabase `pg_cron`, even when NOVA is closed), asks you only for truly manual steps, and delivers files (HTML/CSV/MD) with Open/Download. |
 | **Action engine** | ✅ | “NOVA, Mummy ko WhatsApp karo…”, “Rahul ko call karo”, “India Gate ka rasta”, “YouTube pe lo-fi chalao”, “Zomato kholo”, “kal 9 baje meeting yaad dilana”, “10 min timer”, “mausam kaisa hai”. 16 whitelisted actions; **Direct mode** launches the app instantly, you press the final Send/Call. Payments are never an action. |
 | Stock analyser | ✅ educational | Yahoo daily candles (delayed). RSI-14, SMA-20/50, ATR-14 and volume are computed in code; the LLM only explains them. No buy/sell calls. |
 | Pre-trade checklist + paper journal | ✅ | Rule-based template (1.5×ATR stop, 2:1). Scored each day against real highs/lows. |
@@ -43,9 +44,10 @@ Security: every page and API sits behind `NOVA_PASSPHRASE` (httpOnly cookie). Su
 | Var | Required | Notes |
 |---|---|---|
 | `NOVA_PASSPHRASE` | yes | Your login |
-| `NVIDIA_API_KEY` | recommended | Free credits at build.nvidia.com (primary brain) |
+| `NVIDIA_API_KEY` (or `NVIDIA_AI`) | recommended | Free credits at build.nvidia.com (primary brain) |
 | `GROQ_API_KEY` | yes (fallback) | Free at console.groq.com/keys |
-| `GEMINI_API_KEY` | optional | Free at aistudio.google.com/apikey (fallback) |
+| `GEMINI_API_KEY` (or `Gemini`) | optional | Free at aistudio.google.com/apikey — fallback brain **and** Google Search grounding for research |
+| `TAVILY_API_KEY` | recommended | Free 1,000 searches/month at tavily.com — best web research |
 | `SUPABASE_URL`, `SUPABASE_ANON_KEY` | yes | Supabase project settings |
 | `NOVA_DB_SECRET` | yes | Must equal `private.config.api_secret` in the database |
 | `CRON_SECRET` | yes | Vercel sends it to `/api/cron` |

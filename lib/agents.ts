@@ -70,13 +70,13 @@ async function research(c: Ctx): Promise<Out> {
   ].join("\n\n").slice(0, 16000);
   if (!corpus) return { output: `Web search returned no results (${queries.join(" | ")}). Tip: add a free TAVILY_API_KEY in Vercel for full web search.` };
   const { text: notes } = await llm({ system: c.system + "\nYou are NOVA's Research Agent. Use ONLY the sources given; cite as [n]. Never invent companies, numbers, emails or phone numbers.",
-    maxTokens: 1400, timeoutMs: 90000, strict: true, msgs: [{ role: "user", content: `${context(c)}\n\nSOURCES (web, fetched ${now().slice(0, 10)}):\n${corpus}\n\nWrite concise research notes that answer the instruction. End with a "Sources" list of [n] title — url.` }] });
+    maxTokens: 2500, timeoutMs: 120000, strict: true, msgs: [{ role: "user", content: `${context(c)}\n\nSOURCES (web, fetched ${now().slice(0, 10)}):\n${corpus}\n\nWrite concise research notes that answer the instruction. End with a "Sources" list of [n] title — url.` }] });
   return { output: notes };
 }
 
 async function think(c: Ctx, role: string): Promise<Out> {
   const { text } = await llm({ system: `${c.system}\nYou are NOVA's ${AGENT_LABEL[c.step.agent]}. ${role} Be concrete and practical; use only facts from earlier steps for real-world claims.`,
-    maxTokens: 1600, timeoutMs: 90000, strict: true, msgs: [{ role: "user", content: context(c) }] });
+    maxTokens: 3000, timeoutMs: 120000, strict: true, msgs: [{ role: "user", content: context(c) }] });
   return { output: text };
 }
 
@@ -103,9 +103,9 @@ const md2html = (md: string, title: string) => {
 
 async function document(c: Ctx): Promise<Out> {
   const { text } = await llm({ system: `${c.system}\nYou are NOVA's Document Agent. Write a polished, well-structured Markdown document (# title, ## sections, bullet lists, tables where useful). Use only facts from earlier steps; keep source links.`,
-    maxTokens: 3000, timeoutMs: 150000, prefer: "fast", strict: true, msgs: [{ role: "user", content: context(c) }] });
+    maxTokens: 5000, timeoutMs: 200000, prefer: "fast", strict: true, msgs: [{ role: "user", content: context(c) }] });
   const md = text.replace(/^\s*\*\*[^*\n]+\.(md|markdown)\*\*\s*$/gim, "").replace(/```(markdown|md)?\s*\n?/gi, "").trim();
-  const title = md.match(/^# (.+)$/m)?.[1] ?? c.step.title, base = slug(title);
+  const title = md.match(/^# (.+)$/m)?.[1] ?? c.task.title, base = slug(title);
   return { output: md.slice(0, 1500) + (md.length > 1500 ? "\n…" : ""),
     files: [{ name: `${base}.html`, mime: "text/html", content: md2html(md, title) }, { name: `${base}.md`, mime: "text/markdown", content: md }] };
 }
@@ -216,7 +216,7 @@ async function finalize(t: Row, steps: Row[]) {
   const files = await sel("files", `task_id=eq.${t.id}&select=name`);
   const digest = steps.map((s) => `- ${s.title} [${s.status}]: ${String(s.output ?? "").slice(0, 400)}`).join("\n");
   const { text } = await llm({ system: "You are NOVA reporting to your Boss. 2-4 short sentences, warm and confident, Hinglish-friendly. Say what was done, key findings, what files are ready, and the ONE next action for the Boss (e.g., review & send drafts). Never claim you sent messages.",
-    maxTokens: 300, msgs: [{ role: "user", content: `Task: ${t.title}\nGoal: ${t.goal}\nSteps:\n${digest}\nFiles: ${files.map((f) => f.name).join(", ") || "none"}` }] });
+    maxTokens: 900, timeoutMs: 60000, msgs: [{ role: "user", content: `Task: ${t.title}\nGoal: ${t.goal}\nSteps:\n${digest}\nFiles: ${files.map((f) => f.name).join(", ") || "none"}` }] });
   const anyFailed = steps.some((s) => s.status === "failed");
   await upd("tasks", `id=eq.${t.id}`, { status: anyFailed ? "failed" : "completed", phase: anyFailed ? "Needs attention" : "Completed", summary: text, needs: null, updated_at: now() });
   await ins("messages", { role: "assistant", content: `✅ ${t.title}: ${text}` }).catch(() => null);
