@@ -1,7 +1,7 @@
 // Background worker endpoint, called every minute by Supabase pg_cron while tasks are active.
 import { NextResponse } from "next/server";
 import { tick } from "@/lib/agents";
-import { health } from "@/lib/llm";
+import { health, probe } from "@/lib/llm";
 import { searchEngine, search } from "@/lib/web";
 
 export const maxDuration = 300;
@@ -11,6 +11,7 @@ export async function POST(req: Request) {
   if (!process.env.CRON_SECRET || req.headers.get("authorization") !== `Bearer ${process.env.CRON_SECRET}`)
     return NextResponse.json({ error: "unauthorized" }, { status: 401 });
   const u = new URL(req.url);
+  if (u.searchParams.has("probe")) return NextResponse.json(await probe(u.searchParams.get("probe")!));
   if (u.searchParams.has("health")) { // diagnostics for the operator (secret-protected)
     const hits = await search("payroll software India pricing", 3).catch(() => []);
     return NextResponse.json({ health: await health(), search: searchEngine(), sample: hits.map((h) => h.title) });

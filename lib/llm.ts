@@ -138,6 +138,29 @@ export async function health() {
   return out;
 }
 
+/** Operator diagnostics: time a tiny call against each candidate model of a provider. */
+export async function probe(name: string) {
+  const out: Record<string, string> = {};
+  if (name === "gemini") {
+    const r = await fetch(`https://generativelanguage.googleapis.com/v1beta/models?pageSize=200`, { headers: { "x-goog-api-key": GEMINI_KEY() ?? "" } });
+    const ms: { name: string; supportedGenerationMethods?: string[] }[] = r.ok ? (await r.json()).models ?? [] : [];
+    const names = ms.filter((m) => m.supportedGenerationMethods?.includes("generateContent")).map((m) => m.name.replace("models/", "")).filter((n) => /flash|pro/.test(n) && !/image|tts|live|embed/.test(n)).slice(0, 10);
+    await Promise.all(names.map(async (m) => { const t = Date.now();
+      const x = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${m}:generateContent`, { method: "POST", signal: AbortSignal.timeout(30000),
+        headers: { "x-goog-api-key": GEMINI_KEY()!, "Content-Type": "application/json" }, body: JSON.stringify({ contents: [{ role: "user", parts: [{ text: "Say OK" }] }], generationConfig: { maxOutputTokens: 5 } }) }).catch((e) => ({ status: String(e) }));
+      out[m] = `${(x as Response).status} ${Date.now() - t}ms`; }));
+    return out;
+  }
+  const p = OPENAI_COMPAT.find((x) => x.name === name)!;
+  if (!p?.key()) return { error: "no key" };
+  const ids = await listModels(p);
+  await Promise.all(p.prefer.filter((m) => !ids.length || ids.includes(m)).map(async (m) => { const t = Date.now();
+    const x = await fetch(`${p.base}/chat/completions`, { method: "POST", signal: AbortSignal.timeout(45000), headers: { Authorization: `Bearer ${p.key()}`, "Content-Type": "application/json" },
+      body: JSON.stringify({ model: m, max_tokens: 5, messages: [{ role: "user", content: "Say OK" }] }) }).catch((e) => ({ status: String(e) }));
+    out[m] = `${(x as Response).status} ${Date.now() - t}ms`; }));
+  return out;
+}
+
 /** Tolerant JSON extraction: handles ```json fences and chatter around the object. */
 export function parseJSON<T>(s: string, fallback: T): T {
   const c = s.replace(/```(json)?/gi, "").trim();
