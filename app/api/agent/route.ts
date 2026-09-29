@@ -1,6 +1,7 @@
 // NOVA core brain: Hinglish/English intent routing, stock analysis, idea engine, approvals, self-improvement.
 import { NextResponse } from "next/server";
-import { llm, Msg, providers } from "@/lib/llm";
+import { llm, Msg, providers, health } from "@/lib/llm";
+import { searchEngine } from "@/lib/web";
 import { plan, execServer } from "@/lib/tools";
 import { analyze, findSymbol } from "@/lib/market";
 import { del, ins, sel, snapshot, upd } from "@/lib/db";
@@ -123,6 +124,7 @@ export async function POST(req: Request) {
 
 export async function GET(req: Request) {
   try {
+    if (new URL(req.url).searchParams.has("health")) return NextResponse.json({ health: await health(), search: searchEngine() });
     const state = await snapshot();
     if (new URL(req.url).searchParams.has("export"))
       return new NextResponse(JSON.stringify(state, null, 2), {

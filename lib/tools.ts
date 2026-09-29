@@ -2,6 +2,7 @@
 import { llm, parseJSON, Msg } from "@/lib/llm";
 import { Action, sanitize } from "@/lib/actions";
 import { ins, sel } from "@/lib/db";
+import { createTask } from "@/lib/agents";
 
 const nowIST = () => new Date().toLocaleString("en-IN", { timeZone: "Asia/Kolkata", dateStyle: "full", timeStyle: "short" });
 
@@ -22,6 +23,9 @@ Allowed actions (exact keys):
 {"kind":"note","text":""}
 {"kind":"save_contact","name":"","phone":"<digits>"}
 {"kind":"weather","place":"<city, default Gurugram>"}
+{"kind":"task","goal":"<the full goal, rewritten clearly in English with all details the user gave>"}
+USE "task" for any multi-step work NOVA should do on its own: research, finding clients/leads, market/competitor analysis, business plans,
+building dashboards/websites/apps/tools, reports, proposals, spreadsheets, summarising attached files, earning-money plans. Reply e.g. "Sure Boss, I'm on it." 
 RULES:
 - Only add actions when the user asks you to DO something. Questions/chat → "actions": [] and answer in "reply".
 - NEVER invent phone numbers or emails. Put the person's name in "name"; NOVA looks it up.
@@ -68,6 +72,7 @@ export async function execServer(actions: Action[]) {
     if (a.kind === "note") await ins("memory", { fact: a.text });
     if (a.kind === "save_contact") await ins("contacts", { name: a.name, phone: a.phone.replace(/[^\d+]/g, "") }).catch(() => notes.push(`${a.name} pehle se saved hai.`));
     if (a.kind === "reminder") await ins("reminders", { text: a.text, due_at: a.due_at });
+    if (a.kind === "task") { const t = await createTask(a.goal); (a as { id?: number }).id = t.id; }
     if (a.kind === "weather") notes.push(await weather(a.place || "Gurugram").catch(() => "Weather service abhi respond nahi kar rahi."));
   }
   if (actions.length) await ins("actions", actions.map((a) => ({ kind: a.kind, payload: a }))).catch(() => null);

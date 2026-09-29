@@ -3,7 +3,7 @@
 import { useEffect, useState } from "react";
 
 const LINES = ["NOVA OS v2.0 — personal intelligence", "Initializing neural core", "Linking brain: NVIDIA · Groq · Gemini",
-  "Loading memory, contacts & reminders", "Arming action engine (16 capabilities)", "Voice matrix: हिन्दी + English", "All systems nominal"];
+  "Loading memory, contacts & reminders", "Arming orchestrator + 8 specialist agents", "Voice matrix: हिन्दी + English", "All systems nominal"];
 
 export default function Boot() {
   const [n, setN] = useState(0), [done, setDone] = useState(true);

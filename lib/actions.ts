@@ -16,12 +16,13 @@ export type Action =
   | { kind: "reminder"; text: string; due_at: string }
   | { kind: "note"; text: string }
   | { kind: "save_contact"; name: string; phone: string }
-  | { kind: "weather"; place: string };
+  | { kind: "weather"; place: string }
+  | { kind: "task"; goal: string };
 
 export const KINDS = ["whatsapp", "call", "sms", "email", "maps", "youtube", "music", "search", "open_app", "open_url",
-  "calendar", "timer", "reminder", "note", "save_contact", "weather"] as const;
+  "calendar", "timer", "reminder", "note", "save_contact", "weather", "task"] as const;
 /** Handled inside NOVA (no app switch). Everything else launches another app/site. */
-export const INTERNAL = new Set(["timer", "reminder", "note", "save_contact", "weather"]);
+export const INTERNAL = new Set(["timer", "reminder", "note", "save_contact", "weather", "task"]);
 
 // name → [android package, web fallback]
 export const APPS: Record<string, [string, string]> = {
@@ -96,6 +97,7 @@ export function describe(a: Action): string {
     case "note": return `Note saved: ${a.text}`;
     case "save_contact": return `Contact saved: ${a.name} (${a.phone})`;
     case "weather": return `Weather: ${a.place}`;
+    case "task": return `Task started: ${a.goal}`;
   }
 }
 

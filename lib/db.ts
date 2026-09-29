@@ -35,14 +35,22 @@ export async function snapshot() {
     sel("reminders", "done=eq.false&order=due_at.asc&limit=50"),
     sel("actions", "order=at.desc&limit=30"),
   ]);
+  const [tasks, files] = await Promise.all([
+    sel("tasks", "select=id,title,goal,kind,status,phase,summary,needs,created_at,updated_at&order=updated_at.desc&limit=25"),
+    sel("files", "select=id,task_id,name,mime,size,created_at&order=created_at.desc&limit=40"),
+  ]);
+  const steps = tasks.length ? await sel("steps", `select=id,task_id,idx,agent,title,status,manual,instruction&task_id=in.(${tasks.slice(0, 8).map((t) => t.id).join(",")})&order=idx.asc`) : [];
   const closed = trades.filter((t) => t.status !== "open"), wins = closed.filter((t) => t.status === "win").length;
   const month = new Date().toISOString().slice(0, 7);
   const monthLedger = ledger.filter((l) => String(l.at).startsWith(month));
   return {
     messages: messages.reverse(), proposals, trades, ledger, memory, addenda, watchlist, digest: digests[0] ?? null,
-    contacts, reminders, actions,
+    contacts, reminders, actions, tasks, steps, files,
     metrics: {
       pending: proposals.filter((p) => p.status === "pending").length,
+      activeTasks: tasks.filter((t) => ["planning", "running"].includes(t.status)).length,
+      waiting: tasks.filter((t) => t.status === "waiting_user").length,
+      delivered: files.length,
       tasksToday: actions.filter((a) => String(a.at).slice(0, 10) === new Date().toISOString().slice(0, 10)).length,
       ideasApproved: proposals.filter((p) => p.kind === "idea" && p.status === "approved").length,
       openTrades: trades.length - closed.length,
