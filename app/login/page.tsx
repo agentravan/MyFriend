@@ -10,7 +10,8 @@ export default function Login() {
   }
   return (
     <main className="login">
-      <div className="reactor sleeping small"><i /><i /><i /><b /></div>
+      {/* eslint-disable-next-line @next/next/no-img-element */}
+      <img src="/icon.svg" alt="" width={120} height={120} className="login-core" />
       <h1>NOVA</h1>
       <p className="dim">Identity verification required</p>
       <form onSubmit={go}>

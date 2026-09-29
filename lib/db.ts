@@ -22,7 +22,7 @@ export const del = (t: string, q: string) => db<Row[]>(`${t}?${q}`, { method: "D
 
 /** Everything the dashboard needs, in one round trip batch. */
 export async function snapshot() {
-  const [messages, proposals, trades, ledger, memory, addenda, watchlist, digests] = await Promise.all([
+  const [messages, proposals, trades, ledger, memory, addenda, watchlist, digests, contacts, reminders, actions] = await Promise.all([
     sel("messages", "order=at.desc&limit=40"),
     sel("proposals", "order=at.desc&limit=60"),
     sel("trades", "order=opened_at.desc&limit=100"),
@@ -31,14 +31,19 @@ export async function snapshot() {
     sel("addenda", "order=at.asc"),
     sel("watchlist", "order=at.asc"),
     sel("digests", "order=day.desc&limit=1"),
+    sel("contacts", "order=name.asc&limit=300"),
+    sel("reminders", "done=eq.false&order=due_at.asc&limit=50"),
+    sel("actions", "order=at.desc&limit=30"),
   ]);
   const closed = trades.filter((t) => t.status !== "open"), wins = closed.filter((t) => t.status === "win").length;
   const month = new Date().toISOString().slice(0, 7);
   const monthLedger = ledger.filter((l) => String(l.at).startsWith(month));
   return {
     messages: messages.reverse(), proposals, trades, ledger, memory, addenda, watchlist, digest: digests[0] ?? null,
+    contacts, reminders, actions,
     metrics: {
       pending: proposals.filter((p) => p.status === "pending").length,
+      tasksToday: actions.filter((a) => String(a.at).slice(0, 10) === new Date().toISOString().slice(0, 10)).length,
       ideasApproved: proposals.filter((p) => p.kind === "idea" && p.status === "approved").length,
       openTrades: trades.length - closed.length,
       hitRate: closed.length ? Math.round((wins / closed.length) * 100) : null,

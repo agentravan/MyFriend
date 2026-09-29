@@ -7,7 +7,8 @@ A cinematic, voice-first (Hinglish + English) personal AI that runs **free** on 
 | Module | Status | How |
 |---|---|---|
 | Wake word “NOVA” + voice replies | ✅ | Browser Web Speech API (`hi-IN`), Chrome/Edge, tab open. Tap the reactor or **Alt+N** for a manual trigger. |
-| Brain | ✅ | Groq `llama-3.3-70b-versatile` → Gemini fallback. Your memory/ledger are sent to Groq only, never to Gemini. |
+| Brain | ✅ | NVIDIA NIM `meta/llama-3.3-70b-instruct` → Groq `llama-3.3-70b-versatile` → Gemini. Memory/ledger/contacts never go to Gemini. |
+| **Action engine** | ✅ | “NOVA, Mummy ko WhatsApp karo…”, “Rahul ko call karo”, “India Gate ka rasta”, “YouTube pe lo-fi chalao”, “Zomato kholo”, “kal 9 baje meeting yaad dilana”, “10 min timer”, “mausam kaisa hai”. 16 whitelisted actions; **Direct mode** launches the app instantly, you press the final Send/Call. Payments are never an action. |
 | Stock analyser | ✅ educational | Yahoo daily candles (delayed). RSI-14, SMA-20/50, ATR-14 and volume are computed in code; the LLM only explains them. No buy/sell calls. |
 | Pre-trade checklist + paper journal | ✅ | Rule-based template (1.5×ATR stop, 2:1). Scored each day against real highs/lows. |
 | Income & business engine | ✅ approval-gated | Generates ideas into the **Approval Queue**, learns from your rejection reasons. |
@@ -15,7 +16,8 @@ A cinematic, voice-first (Hinglish + English) personal AI that runs **free** on 
 | Ledger (“tracks funds”) | ✅ manual | “NOVA, 500 rupees kharch hua chai pe”. Only numbers you enter; nothing is invented. |
 | Memory | ✅ | “NOVA, yaad rakhna ki…” |
 | Notifications | ✅ | Browser notification when the daily briefing is ready. |
-| Device/OS control, bank/broker links, autonomous operations | ❌ not built | Intentionally off. A future local companion must use an allow-list + per-action confirmation. |
+| Background control with screen off | ⏭ next | Telegram voice bot + Tasker bridge (allow-listed verbs, push-woken). |
+| Payments, bank/broker actions | ❌ by design | NOVA never moves money. |
 
 ## Architecture
 
@@ -24,7 +26,10 @@ app/page.tsx              HUD: arc reactor, approval queue, metrics, market lens
 app/api/agent/route.ts    Brain: intent routing (Hinglish/English/Devanagari), stocks, ideas, approvals
 app/api/cron/route.ts     Daily Protocol at 08:00 IST (Mon–Sat), protected by CRON_SECRET
 hooks/useJarvisVoice.ts   Wake word, continuous recognition, bilingual TTS
-lib/llm.ts                Groq → Gemini router
+lib/llm.ts                NVIDIA → Groq → Gemini router
+lib/actions.ts            Action whitelist + deep-link builders (Android intents, wa.me, tel:, maps…)
+lib/tools.ts              Action planner, contact lookup, weather (Open-Meteo), reminders
+components/Core.tsx       Canvas neural core, voice-reactive
 lib/market.ts             Yahoo data + indicators + paper-trade scoring
 lib/nova.ts               Persona, idea engine, self-improvement A/B test, daily briefing
 lib/db.ts                 Minimal Supabase REST client
@@ -38,7 +43,8 @@ Security: every page and API sits behind `NOVA_PASSPHRASE` (httpOnly cookie). Su
 | Var | Required | Notes |
 |---|---|---|
 | `NOVA_PASSPHRASE` | yes | Your login |
-| `GROQ_API_KEY` | yes | Free at console.groq.com/keys |
+| `NVIDIA_API_KEY` | recommended | Free credits at build.nvidia.com (primary brain) |
+| `GROQ_API_KEY` | yes (fallback) | Free at console.groq.com/keys |
 | `GEMINI_API_KEY` | optional | Free at aistudio.google.com/apikey (fallback) |
 | `SUPABASE_URL`, `SUPABASE_ANON_KEY` | yes | Supabase project settings |
 | `NOVA_DB_SECRET` | yes | Must equal `private.config.api_secret` in the database |
