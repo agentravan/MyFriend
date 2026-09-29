@@ -4,7 +4,7 @@ import { useJarvisVoice } from "@/hooks/useJarvisVoice";
 import type { Snapshot, Row } from "@/lib/db";
 import type { Analysis } from "@/lib/market";
 
-const inr = (n: number) => "₹" + Math.round(n).toLocaleString("en-IN");
+const inr = (n: number) => (n < 0 ? "−₹" : "₹") + Math.round(Math.abs(n)).toLocaleString("en-IN");
 const todayIST = () => new Date().toLocaleDateString("en-CA", { timeZone: "Asia/Kolkata" });
 const CHECKS = ["Risk ≤ 1–2% of capital on this trade", "Stop-loss decided before entry", "Reward:risk ≥ 2:1",
   "I can explain WHY in one line", "Not revenge / FOMO trading"];

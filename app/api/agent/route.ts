@@ -31,7 +31,7 @@ async function handle(text: string) {
   if (m && (has(R.expense, text) || has(R.income, text))) {
     const amt = Number((m[3] ?? m[5]).replace(/,/g, "")) * (has(R.expense, text) ? -1 : 1);
     await ins("ledger", { amount: amt, note: text.slice(0, 140) });
-    return { reply: `Ledger updated: ${amt > 0 ? "+" : ""}₹${amt.toLocaleString("en-IN")}. Dashboard pe dikh raha hai.` };
+    return { reply: `Ledger updated: ${amt > 0 ? "+" : "−"}₹${Math.abs(amt).toLocaleString("en-IN")} (${amt > 0 ? "income" : "expense"}). Dashboard pe dikh raha hai.` };
   }
   // 3) Watchlist
   const sym = findSymbol(text);
