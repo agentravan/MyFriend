@@ -29,7 +29,7 @@ Output ONLY JSON: {"title":"<short task title>","kind":"research|build|leads|doc
 
 export async function planTask(t: Row) {
   const { text } = await llm({
-    system: PLAN_PROMPT, json: true, maxTokens: 1200, temperature: 0.3, timeoutMs: 60000,
+    system: PLAN_PROMPT, json: true, strict: true, maxTokens: 1200, temperature: 0.3, timeoutMs: 60000,
     msgs: [{ role: "user", content: `GOAL: ${t.goal}${t.attachment ? `\n\nATTACHED FILE (excerpt):\n${String(t.attachment).slice(0, 3000)}` : ""}` }],
   });
   const p = parseJSON<{ title?: string; kind?: string; steps?: { agent: string; title: string; instruction: string }[] }>(text, {});
@@ -56,31 +56,32 @@ const context = (c: Ctx) =>
 const slug = (s: string) => s.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "").slice(0, 40) || "nova";
 
 async function research(c: Ctx): Promise<Out> {
-  const { text } = await llm({ system: "You write web search queries. Output JSON only.", json: true, maxTokens: 200, prefer: "fast",
+  const { text } = await llm({ system: "You write web search queries. Output JSON only.", json: true, maxTokens: 200, prefer: "fast", strict: true,
     msgs: [{ role: "user", content: `${context(c)}\n\nWrite 3 precise web search queries (India-focused if relevant). JSON: {"queries":["..."]}` }] });
   const queries = parseJSON<{ queries?: string[] }>(text, {}).queries?.slice(0, 3) ?? [c.step.title];
   const results = (await Promise.all(queries.map((q) => search(q, 6)))).flat();
   const seen = new Set<string>(), hits = results.filter((h) => !seen.has(h.url) && seen.add(h.url));
   const pages = await Promise.all(hits.slice(0, 4).map(async (h) => ({ ...h, body: await read(h.url, 3500) })));
   const corpus = [
+    ...answers.map((a) => `[G] ${a.title}\n${a.snippet}`),
     ...pages.map((p, i) => `[${i + 1}] ${p.title} — ${p.url}\n${p.body || p.snippet}`),
-    ...hits.slice(4, 14).map((h, i) => `[${i + 5}] ${h.title} — ${h.url}\n${h.snippet}`),
+    ...hits.filter((h) => h.url).slice(4, 14).map((h, i) => `[${i + 5}] ${h.title} — ${h.url}\n${h.snippet}`),
   ].join("\n\n").slice(0, 16000);
-  if (!corpus) return { output: "Web search returned no results for: " + queries.join(" | ") };
+  if (!corpus) return { output: `Web search returned no results (${queries.join(" | ")}). Tip: add a free TAVILY_API_KEY in Vercel for full web search.` };
   const { text: notes } = await llm({ system: c.system + "\nYou are NOVA's Research Agent. Use ONLY the sources given; cite as [n]. Never invent companies, numbers, emails or phone numbers.",
-    maxTokens: 1400, timeoutMs: 90000, msgs: [{ role: "user", content: `${context(c)}\n\nSOURCES (web, fetched ${now().slice(0, 10)}):\n${corpus}\n\nWrite concise research notes that answer the instruction. End with a "Sources" list of [n] title — url.` }] });
+    maxTokens: 1400, timeoutMs: 90000, strict: true, msgs: [{ role: "user", content: `${context(c)}\n\nSOURCES (web, fetched ${now().slice(0, 10)}):\n${corpus}\n\nWrite concise research notes that answer the instruction. End with a "Sources" list of [n] title — url.` }] });
   return { output: notes };
 }
 
 async function think(c: Ctx, role: string): Promise<Out> {
   const { text } = await llm({ system: `${c.system}\nYou are NOVA's ${AGENT_LABEL[c.step.agent]}. ${role} Be concrete and practical; use only facts from earlier steps for real-world claims.`,
-    maxTokens: 1600, timeoutMs: 90000, msgs: [{ role: "user", content: context(c) }] });
+    maxTokens: 1600, timeoutMs: 90000, strict: true, msgs: [{ role: "user", content: context(c) }] });
   return { output: text };
 }
 
 async function data(c: Ctx): Promise<Out> {
   const { text } = await llm({ system: `You are NOVA's Data Agent. Produce ONE CSV table only (header row first, comma-separated, quote fields containing commas). No prose, no code fences. Use only facts present in the context; leave unknown cells empty. Never invent emails or phone numbers.`,
-    maxTokens: 2500, timeoutMs: 120000, prefer: "fast", msgs: [{ role: "user", content: context(c) }] });
+    maxTokens: 2500, timeoutMs: 120000, prefer: "fast", strict: true, msgs: [{ role: "user", content: context(c) }] });
   const csv = text.replace(/```(csv)?/g, "").trim();
   const rows = csv.split("\n").length - 1;
   return { output: `Built a table with ${rows} rows.\n\n${csv.split("\n").slice(0, 8).join("\n")}${rows > 7 ? "\n…" : ""}`,
@@ -101,7 +102,7 @@ const md2html = (md: string, title: string) => {
 
 async function document(c: Ctx): Promise<Out> {
   const { text } = await llm({ system: `${c.system}\nYou are NOVA's Document Agent. Write a polished, well-structured Markdown document (# title, ## sections, bullet lists, tables where useful). Use only facts from earlier steps; keep source links.`,
-    maxTokens: 3000, timeoutMs: 150000, prefer: "fast", msgs: [{ role: "user", content: context(c) }] });
+    maxTokens: 3000, timeoutMs: 150000, prefer: "fast", strict: true, msgs: [{ role: "user", content: context(c) }] });
   const title = text.match(/^# (.+)$/m)?.[1] ?? c.step.title, base = slug(title);
   return { output: text.slice(0, 1500) + (text.length > 1500 ? "\n…" : ""),
     files: [{ name: `${base}.html`, mime: "text/html", content: md2html(text, title) }, { name: `${base}.md`, mime: "text/markdown", content: text }] };
@@ -113,7 +114,7 @@ Must be responsive, polished, dark futuristic style unless told otherwise, no bu
 Output ONLY the HTML document starting with <!doctype html>. No explanations, no code fences.`;
 
 async function coding(c: Ctx): Promise<Out> {
-  const { text } = await llm({ system: CODER, maxTokens: 8000, timeoutMs: 240000, prefer: "fast", temperature: 0.4, msgs: [{ role: "user", content: context(c) }] });
+  const { text } = await llm({ system: CODER, maxTokens: 8000, timeoutMs: 240000, prefer: "fast", temperature: 0.4, strict: true, msgs: [{ role: "user", content: context(c) }] });
   const html = extractHtml(text);
   if (!html) return { output: "Coding Agent could not produce valid HTML. Raw start: " + text.slice(0, 300) };
   return { output: `Built ${Math.round(html.length / 1024)} KB HTML app.`, files: [{ name: `${slug(c.task.title)}.html`, mime: "text/html", content: html }] };
@@ -139,7 +140,7 @@ async function testing(c: Ctx): Promise<Out> {
   if (!f) return { output: "Nothing to test — no HTML file was built in this task." };
   let html = f.content as string, errs = checkHtml(html), log = [`Round 1: ${errs.length ? errs.join("; ") : "all checks passed"}`];
   for (let round = 2; errs.length && round <= 3; round++) {
-    const { text } = await llm({ system: CODER, maxTokens: 8000, timeoutMs: 200000, prefer: "fast", temperature: 0.2,
+    const { text } = await llm({ system: CODER, maxTokens: 8000, timeoutMs: 200000, prefer: "fast", temperature: 0.2, strict: true,
       msgs: [{ role: "user", content: `Fix these problems and return the full corrected HTML:\n- ${errs.join("\n- ")}\n\nHTML:\n${html.slice(0, 60000)}` }] });
     const fixed = extractHtml(text);
     if (!fixed) break;

@@ -171,7 +171,8 @@ export default function Home() {
   const mode: CoreMode = busy || daily ? "thinking" : active && v.mode === "off" ? "thinking" : v.mode;
   const status = busy ? "PROCESSING" : active ? String(current?.phase ?? "EXECUTING").split(" · ")[0].toUpperCase()
     : { off: "STANDBY", sleeping: 'SAY "NOVA"', awake: "LISTENING", speaking: "SPEAKING", thinking: "PROCESSING" }[v.mode];
-  const brainBad = health && Object.values(health).every((x) => x !== "ok");
+  const brains = Object.entries(health ?? {}).filter(([k]) => !k.endsWith("_model"));
+  const brainBad = !!health && brains.every(([, x]) => x !== "ok");
   const lastAssistant = [...(s?.messages ?? [])].reverse().find((m) => m.role === "assistant")?.content;
   const vis = (x: View) => (view === x ? "" : "m-hide");
 
@@ -184,7 +185,7 @@ export default function Home() {
         <div className="brand"><span className="hex">⬡</span><b>NOVA</b><em>personal AI employee</em></div>
         <div className="clock"><b>{clock.t}</b><span>{clock.d}<br />IST</span></div>
         <div className="brains">
-          {health ? Object.entries(health).map(([k, st]) => <span key={k} className={`chip ${st === "ok" ? "live" : "bad"}`} title={st}>{k.toUpperCase()}</span>)
+          {health ? brains.map(([k, st]) => <span key={k} className={`chip ${st === "ok" ? "live" : "bad"}`} title={st === "ok" ? `model: ${health[`${k}_model`] ?? "?"}` : st}>{k.toUpperCase()}</span>)
             : <span className="chip">LINKING…</span>}
           {engine && <span className="chip" title="Web search engine">🔎 {engine}</span>}
         </div>
@@ -197,7 +198,7 @@ export default function Home() {
         </div>
       </header>
       {(err || brainBad) && <div className="alert" onClick={() => setErr("")}>
-        ⚠ {err || `Brain keys rejected — ${Object.entries(health!).map(([k, x]) => `${k}: ${x}`).join(" · ")}. Fix in Vercel → Settings → Environment Variables, then Redeploy.`}</div>}
+        ⚠ {err || (brains.length ? `Brain offline — ${brains.map(([k, x]) => `${k}: ${x}`).join(" · ")}. Fix the key in Vercel → Settings → Environment Variables, then Redeploy.` : "No AI key found. Add NVIDIA_API_KEY (or GROQ_API_KEY) in Vercel, then Redeploy.")}</div>}
 
       <section className="deck">
         {/* ───── Left: missions ───── */}
@@ -366,10 +367,10 @@ export default function Home() {
               </>}
               {mod === "system" && <>
                 <h3>Systems</h3>
-                <Sys ok={!brainBad && !!health} label="Brain" note={health ? Object.entries(health).map(([k, x]) => `${k}: ${x}`).join(" · ") || "no keys" : "checking…"} />
+                <Sys ok={!brainBad && !!health} label="Brain" note={health ? brains.map(([k, x]) => `${k}: ${x === "ok" ? `ok (${health[`${k}_model`]})` : x}`).join(" · ") || "no keys" : "checking…"} />
                 <Sys ok label="Task engine" note="Orchestrator → Research · Business · HR · Data · Coding · Testing · Document · Communication agents" />
                 <Sys ok label="Background work" note="Continues every minute via Supabase scheduler, even with NOVA closed" />
-                <Sys ok label="Web research" note={`${engine || "…"} search + page reader · add TAVILY_API_KEY for better results`} />
+                <Sys ok label="Web research" note={`${engine || "…"} · add a free TAVILY_API_KEY in Vercel for full web search`} />
                 <Sys ok={v.supported} label="Voice & wake word" note="Chrome/Edge · screen kept awake while armed" />
                 <Sys ok label="Phone actions" note="WhatsApp · call · SMS · email · maps · YouTube · apps · calendar · timers · reminders" />
                 <Sys label="Payments / banking / sending as you" note="Never — NOVA drafts, you send" />

@@ -1,5 +1,5 @@
 // Web tools for the Research Agent: search (Tavily/Brave if keyed, else DuckDuckGo HTML) + page reader (Jina, else raw).
-import { env } from "@/lib/llm";
+import { env, GEMINI_KEY, geminiRaw } from "@/lib/llm";
 
 export type Hit = { title: string; url: string; snippet: string };
 const UA = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126 Safari/537.36";
@@ -20,26 +20,42 @@ async function brave(q: string, n: number): Promise<Hit[]> {
   return ((await r.json()).web?.results ?? []).map((x: { title: string; url: string; description: string }) => ({ title: strip(x.title), url: x.url, snippet: strip(x.description ?? "") }));
 }
 
-async function ddg(q: string, n: number): Promise<Hit[]> {
-  const r = await fetch("https://html.duckduckgo.com/html/", { method: "POST", signal: withTimeout(15000),
-    headers: { "User-Agent": UA, "Content-Type": "application/x-www-form-urlencoded" }, body: `q=${encodeURIComponent(q)}&kl=in-en` });
-  if (!r.ok) throw new Error(`ddg ${r.status}`);
-  const html = await r.text(), hits: Hit[] = [];
-  const re = /<a[^>]+class="result__a"[^>]+href="([^"]+)"[^>]*>([\s\S]*?)<\/a>[\s\S]*?<a[^>]+class="result__snippet"[^>]*>([\s\S]*?)<\/a>/g;
-  let m: RegExpExecArray | null;
-  while ((m = re.exec(html)) !== null && hits.length < n) {
-    let url = m[1];
-    const u = url.match(/uddg=([^&]+)/); if (u) url = decodeURIComponent(u[1]);
-    if (url.startsWith("//")) url = "https:" + url;
-    if (/duckduckgo\.com\/y\.js|ad_provider/.test(url)) continue; // skip ads
-    hits.push({ title: strip(m[2]), url, snippet: strip(m[3]) });
-  }
+async function serper(q: string, n: number): Promise<Hit[]> {
+  const r = await fetch("https://google.serper.dev/search", { method: "POST", signal: withTimeout(15000),
+    headers: { "X-API-KEY": env("SERPER_API_KEY")!, "Content-Type": "application/json" }, body: JSON.stringify({ q, gl: "in", num: n }) });
+  if (!r.ok) throw new Error(`serper ${r.status}`);
+  return ((await r.json()).organic ?? []).map((x: { title: string; link: string; snippet: string }) => ({ title: x.title, url: x.link, snippet: x.snippet ?? "" }));
+}
+
+/** Google Search grounding through the user's free Gemini key: real Google results + a grounded summary. */
+async function googleViaGemini(q: string, n: number): Promise<Hit[]> {
+  const { text, raw } = await geminiRaw({ system: "Answer factually using Google Search. Be concise; list concrete names, prices and facts.", tools: [{ google_search: {} }],
+    msgs: [{ role: "user", content: q }], maxTokens: 900, timeoutMs: 30000 });
+  const cand = (raw.candidates as { groundingMetadata?: { groundingChunks?: { web?: { uri: string; title: string } }[] } }[] | undefined)?.[0];
+  const chunks = cand?.groundingMetadata?.groundingChunks ?? [];
+  const hits: Hit[] = chunks.filter((c) => c.web?.uri).slice(0, n).map((c) => ({ title: c.web!.title, url: c.web!.uri, snippet: "" }));
+  if (text) hits.unshift({ title: `Google-grounded answer for “${q}”`, url: "", snippet: text.slice(0, 2500) });
   return hits;
 }
 
+async function wikipedia(q: string, n: number): Promise<Hit[]> {
+  const r = await fetch(`https://en.wikipedia.org/w/api.php?action=query&list=search&format=json&srlimit=${n}&srsearch=${encodeURIComponent(q)}`,
+    { signal: withTimeout(10000), headers: { "User-Agent": "NOVA-personal-assistant/1.0" } });
+  if (!r.ok) throw new Error(`wikipedia ${r.status}`);
+  return ((await r.json()).query?.search ?? []).map((x: { title: string; snippet: string }) =>
+    ({ title: x.title, url: `https://en.wikipedia.org/wiki/${encodeURIComponent(x.title.replace(/ /g, "_"))}`, snippet: strip(x.snippet) }));
+}
+
+const ENGINES: [string, () => string | undefined, (q: string, n: number) => Promise<Hit[]>][] = [
+  ["tavily", () => env("TAVILY_API_KEY"), tavily], ["serper", () => env("SERPER_API_KEY"), serper], ["brave", () => env("BRAVE_API_KEY"), brave],
+  ["google (via Gemini)", GEMINI_KEY, googleViaGemini], ["wikipedia", () => "always", wikipedia],
+];
+
 export async function search(q: string, n = 6): Promise<Hit[]> {
-  const engines = [env("TAVILY_API_KEY") && tavily, env("BRAVE_API_KEY") && brave, ddg].filter(Boolean) as ((q: string, n: number) => Promise<Hit[]>)[];
-  for (const e of engines) { try { const h = await e(q, n); if (h.length) return h; } catch { /* next engine */ } }
+  for (const [, has, fn] of ENGINES) {
+    if (!has()) continue;
+    try { const h = await fn(q, n); if (h.length) return h; } catch { /* next engine */ }
+  }
   return [];
 }
 
@@ -56,4 +72,4 @@ export async function read(url: string, max = 6000): Promise<string> {
   } catch { return ""; }
 }
 
-export const searchEngine = () => (env("TAVILY_API_KEY") ? "tavily" : env("BRAVE_API_KEY") ? "brave" : "duckduckgo");
+export const searchEngine = () => ENGINES.find(([, has]) => has())![0];
