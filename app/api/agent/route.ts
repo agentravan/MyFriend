@@ -6,6 +6,7 @@ import { plan, execServer } from "@/lib/tools";
 import { analyze, findSymbol } from "@/lib/market";
 import { del, ins, sel, snapshot, upd } from "@/lib/db";
 import { generateIdeas, persona, runDaily } from "@/lib/nova";
+import { linkPhone, phone, PhoneOp } from "@/lib/phone";
 
 export const maxDuration = 60;
 export const dynamic = "force-dynamic";
@@ -111,6 +112,9 @@ export async function POST(req: Request) {
       case "daily": out = await runDaily(!!b.force); break;
       case "contact": // from the phone's contact picker
         await ins("contacts", { name: String(b.name).slice(0, 60), phone: String(b.phone).replace(/[^\d+]/g, "") }).catch(() => null); break;
+      case "phone_setup": await linkPhone(String(b.url ?? "")); out = { reply: "Phone Link connected, Boss. Test call bhejun?" }; break;
+      case "phone": await phone(b.op as PhoneOp, { number: b.number, text: b.text, name: b.name }); out = { reply: "Done, Boss." }; break;
+      case "events_seen": await upd("device_events", "seen=eq.false", { seen: true }); break;
       case "reminder_done": await upd("reminders", `id=eq.${Number(b.id)}`, { done: true }); break;
       case "delete":
         if (DELETABLE.has(b.table)) await del(b.table, `${b.table === "watchlist" ? "symbol" : "id"}=eq.${encodeURIComponent(b.id)}`);

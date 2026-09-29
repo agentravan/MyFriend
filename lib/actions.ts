@@ -17,12 +17,13 @@ export type Action =
   | { kind: "note"; text: string }
   | { kind: "save_contact"; name: string; phone: string }
   | { kind: "weather"; place: string }
-  | { kind: "task"; goal: string };
+  | { kind: "task"; goal: string }
+  | { kind: "phone"; op: string; number?: string; name?: string };
 
 export const KINDS = ["whatsapp", "call", "sms", "email", "maps", "youtube", "music", "search", "open_app", "open_url",
-  "calendar", "timer", "reminder", "note", "save_contact", "weather", "task"] as const;
+  "calendar", "timer", "reminder", "note", "save_contact", "weather", "task", "phone"] as const;
 /** Handled inside NOVA (no app switch). Everything else launches another app/site. */
-export const INTERNAL = new Set(["timer", "reminder", "note", "save_contact", "weather", "task"]);
+export const INTERNAL = new Set(["timer", "reminder", "note", "save_contact", "weather", "task", "phone"]);
 
 // name → [android package, web fallback]
 export const APPS: Record<string, [string, string]> = {
@@ -79,6 +80,9 @@ export function actionUrl(a: Action, android: boolean): string | null {
   }
 }
 
+const PHONE_LABEL: Record<string, string> = { answer: "answer call", end_call: "end call", speaker_on: "speaker on", torch_on: "torch on",
+  torch_off: "torch off", silent: "silent mode", vibrate: "vibrate mode", ring: "ring mode", find_phone: "ring loudly to find it" };
+
 export function describe(a: Action): string {
   switch (a.kind) {
     case "whatsapp": return `WhatsApp → ${a.name ?? a.phone ?? "choose contact"}: “${a.text}”`;
@@ -97,7 +101,8 @@ export function describe(a: Action): string {
     case "note": return `Note saved: ${a.text}`;
     case "save_contact": return `Contact saved: ${a.name} (${a.phone})`;
     case "weather": return `Weather: ${a.place}`;
-    case "task": return `Task started: ${a.goal}`;
+    case "task": return `Mission started: ${a.goal}`;
+    case "phone": return `Phone: ${PHONE_LABEL[a.op] ?? a.op}`;
   }
 }
 

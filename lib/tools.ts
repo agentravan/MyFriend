@@ -3,6 +3,7 @@ import { llm, parseJSON, Msg } from "@/lib/llm";
 import { Action, sanitize } from "@/lib/actions";
 import { ins, sel } from "@/lib/db";
 import { createTask } from "@/lib/agents";
+import { phone, setting, PhoneOp } from "@/lib/phone";
 
 const nowIST = () => new Date().toLocaleString("en-IN", { timeZone: "Asia/Kolkata", dateStyle: "full", timeStyle: "short" });
 
@@ -24,6 +25,7 @@ Allowed actions (exact keys):
 {"kind":"save_contact","name":"","phone":"<digits>"}
 {"kind":"weather","place":"<city, default Gurugram>"}
 {"kind":"task","goal":"<the full goal, rewritten clearly in English with all details the user gave>"}
+{"kind":"phone","op":"answer|end_call|speaker_on|torch_on|torch_off|silent|vibrate|ring|find_phone"}   (controls the user's linked Android phone)
 USE "task" for any multi-step work NOVA should do on its own: research, finding clients/leads, market/competitor analysis, business plans,
 building dashboards/websites/apps/tools, reports, proposals, spreadsheets, summarising attached files, earning-money plans. Reply e.g. "Sure Boss, I'm on it." 
 RULES:
@@ -63,11 +65,21 @@ export async function weather(place: string) {
 /** Resolve names → numbers from saved contacts, persist internal actions. Returns extra reply text. */
 export async function execServer(actions: Action[]) {
   const notes: string[] = [];
+  const linked = !!(await setting("phone_webhook").catch(() => undefined));
   for (const a of actions) {
     if ((a.kind === "whatsapp" || a.kind === "call" || a.kind === "sms") && !a.phone && a.name) {
       const q = encodeURIComponent(`*${a.name.replace(/[*,()]/g, "").trim()}*`);
       const [c] = await sel("contacts", `name=ilike.${q}&limit=1`);
       if (c) { a.phone = c.phone; a.name = c.name; }
+    }
+    const tag = a as { via?: string };
+    if (a.kind === "call" && linked && a.phone) {           // Phone Link: dial directly from the phone
+      try { await phone("call", { number: a.phone, name: a.name }); tag.via = "phone"; } catch (e) { notes.push((e as Error).message); }
+    }
+    if (a.kind === "sms" && linked && a.phone) tag.via = "phone-confirm";  // SMS goes out only after "haan, bhej do"
+    if (a.kind === "phone") {
+      if (!linked) notes.push("Phone Link abhi set nahi hai — Settings → Phone Link se 2 minute mein connect karo.");
+      else try { await phone(a.op as PhoneOp); tag.via = "phone"; } catch (e) { notes.push((e as Error).message); }
     }
     if (a.kind === "note") await ins("memory", { fact: a.text });
     if (a.kind === "save_contact") await ins("contacts", { name: a.name, phone: a.phone.replace(/[^\d+]/g, "") }).catch(() => notes.push(`${a.name} pehle se saved hai.`));

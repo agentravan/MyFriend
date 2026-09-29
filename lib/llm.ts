@@ -145,6 +145,42 @@ export async function health() {
   return out;
 }
 
+// ───────────── Neural voice (Gemini TTS) ─────────────
+let ttsModel: string | undefined;
+export const TTS_VOICES = ["Kore", "Aoede", "Despina", "Leda", "Zephyr", "Charon"] as const;
+async function pickTTS() {
+  if (ttsModel) return ttsModel;
+  const r = await fetch(`https://generativelanguage.googleapis.com/v1beta/models?pageSize=200`, { headers: { "x-goog-api-key": GEMINI_KEY()! }, signal: AbortSignal.timeout(8000) });
+  const names: string[] = r.ok ? ((await r.json()).models ?? []).map((m: { name: string }) => m.name.replace("models/", "")).filter((n: string) => /tts/i.test(n)) : [];
+  ttsModel = process.env.GEMINI_TTS_MODEL || names.find((n) => /flash/.test(n)) || names[0];
+  return ttsModel;
+}
+const wav = (pcm: Buffer, rate = 24000) => {
+  const h = Buffer.alloc(44);
+  h.write("RIFF", 0); h.writeUInt32LE(36 + pcm.length, 4); h.write("WAVE", 8); h.write("fmt ", 12); h.writeUInt32LE(16, 16);
+  h.writeUInt16LE(1, 20); h.writeUInt16LE(1, 22); h.writeUInt32LE(rate, 24); h.writeUInt32LE(rate * 2, 28); h.writeUInt16LE(2, 32); h.writeUInt16LE(16, 34);
+  h.write("data", 36); h.writeUInt32LE(pcm.length, 40);
+  return Buffer.concat([h, pcm]);
+};
+/** Returns a WAV file of NOVA speaking `text` (warm, confident female assistant; Hinglish-friendly). */
+export async function speakNeural(text: string, voice = "Kore"): Promise<Buffer> {
+  if (!GEMINI_KEY()) throw new Error("no gemini key");
+  const model = await pickTTS();
+  if (!model) throw new Error("no TTS model available");
+  const r = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent`, {
+    method: "POST", signal: AbortSignal.timeout(25000), headers: { "x-goog-api-key": GEMINI_KEY()!, "Content-Type": "application/json" },
+    body: JSON.stringify({
+      contents: [{ parts: [{ text: `Say in a warm, calm, confident voice like a futuristic personal AI assistant (Indian English / Hinglish accent): ${text.slice(0, 900)}` }] }],
+      generationConfig: { responseModalities: ["AUDIO"], speechConfig: { voiceConfig: { prebuiltVoiceConfig: { voiceName: (TTS_VOICES as readonly string[]).includes(voice) ? voice : "Kore" } } } },
+    }),
+  });
+  if (!r.ok) { if (r.status === 404) ttsModel = undefined; throw new Error(`tts ${r.status}`); }
+  const part = (await r.json()).candidates?.[0]?.content?.parts?.find((p: { inlineData?: { data: string; mimeType: string } }) => p.inlineData);
+  if (!part) throw new Error("tts: no audio");
+  const rate = Number(part.inlineData.mimeType.match(/rate=(\d+)/)?.[1] ?? 24000);
+  return wav(Buffer.from(part.inlineData.data, "base64"), rate);
+}
+
 /** Operator diagnostics: time a tiny call against each candidate model of a provider. */
 export async function probe(name: string) {
   const out: Record<string, string> = {};

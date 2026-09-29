@@ -2,8 +2,8 @@
 // Cinematic boot sequence, once per browser session.
 import { useEffect, useState } from "react";
 
-const LINES = ["NOVA OS v2.0 — personal intelligence", "Initializing neural core", "Linking brain: NVIDIA · Groq · Gemini",
-  "Loading memory, contacts & reminders", "Arming orchestrator + 8 specialist agents", "Voice matrix: हिन्दी + English", "All systems nominal"];
+const LINES = ["NOVA OS v3 — personal AI employee", "Initializing neural core", "Linking brain: NVIDIA · Groq · Gemini",
+  "Phone Link · memory · contacts · reminders", "Arming orchestrator + 8 specialist agents", "Voice: NOVA neural · हिन्दी + English", "All systems nominal"];
 
 export default function Boot() {
   const [n, setN] = useState(0), [done, setDone] = useState(true);

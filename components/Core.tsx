@@ -4,7 +4,7 @@ import { useEffect, useRef } from "react";
 
 export type CoreMode = "off" | "sleeping" | "awake" | "speaking" | "thinking";
 const COLORS: Record<CoreMode, [number, number, number]> = {
-  off: [70, 110, 130], sleeping: [64, 214, 255], awake: [255, 154, 46], speaking: [255, 170, 60], thinking: [169, 139, 255],
+  off: [90, 120, 140], sleeping: [94, 224, 255], awake: [255, 180, 84], speaking: [255, 180, 84], thinking: [185, 164, 255],
 };
 
 export default function Core({ mode, level, onClick, size = 300 }: { mode: CoreMode; level: React.RefObject<number>; onClick?: () => void; size?: number }) {
