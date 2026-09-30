@@ -108,7 +108,7 @@ async function think(c: Ctx, role: string): Promise<Out> {
 
 async function data(c: Ctx): Promise<Out> {
   // The model returns structured rows; CSV is built in code so quoting is always correct (addresses contain commas).
-  const { text } = await llm({ system: `You are NOVA's Data Agent. Output ONLY JSON: {"columns":["..."],"rows":[["..."]]}. Include EVERY record found in the earlier steps — do not drop any; merge duplicates of the same organisation. Use only facts present in the context; unknown cells are "" (never "Not available"/"N/A"). Never invent emails or phone numbers.`,
+  const { text } = await llm({ system: `You are NOVA's Data Agent. Output ONLY JSON: {"columns":["..."],"rows":[["..."]]}. Include EVERY record found in the earlier steps — do not drop any; merge duplicates of the same organisation. Use only facts present in the context; unknown cells are "" (never "Not available"/"N/A"). Never invent emails or phone numbers. A "Website" column holds ONLY the organisation's own official domain — IndiaMART/Justdial/LinkedIn/directory pages go in a "Source URL" column, never in Website.`,
     json: true, maxTokens: 6000, timeoutMs: 150000, prefer: "fast", strict: true, msgs: [{ role: "user", content: context(c) }] });
   const t = parseJSON<{ columns?: string[]; rows?: unknown[][] }>(text, {});
   const cols = t.columns?.length ? t.columns : [];
@@ -121,6 +121,8 @@ async function data(c: Ctx): Promise<Out> {
   return { output: `Built a table with ${rows.length} rows and ${cols.length} columns: ${cols.join(", ")}.${verified ? ` Websites checked: ${verified}.` : ""}`,
     files: [{ name: `${slug(c.task.title)}-table.csv`, mime: "text/csv", content: csv }] };
 }
+
+const DIRECTORY = /(^|\.)(indiamart|justdial|tradeindia|exportersindia|linkedin|facebook|instagram|zaubacorp|tofler|falconebiz|thecompanycheck|glassdoor|naukri|ambitionbox|google|wikipedia|crunchbase|dnb|yellowpages|sulekha|asklaila|getdistributors|made-in-china|alibaba)\./i;
 
 /** Lead accuracy: open every website in the table and check it is live and actually mentions the company. Appends a result cell per row. */
 async function verifySites(cols: string[], rows: unknown[][]) {
@@ -136,6 +138,7 @@ async function verifySites(cols: string[], rows: unknown[][]) {
     const keys = words(String(r[n] ?? ""));
     try {
       const host = new URL(url).hostname.replace(/^www\./, "");
+      if (DIRECTORY.test(host)) return "⚠ directory listing, not official site";
       const res = await fetch(url, { redirect: "follow", signal: AbortSignal.timeout(8000), headers: { "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) Chrome/126 Safari/537.36" } });
       if (!res.ok && res.status !== 403) return `✗ site error ${res.status}`;
       const text = res.ok ? (await res.text()).slice(0, 200000).toLowerCase() : "";
@@ -285,7 +288,7 @@ async function finalize(t: Row, steps: Row[]) {
   await upd("tasks", `id=eq.${t.id}`, { status: anyFailed ? "failed" : "completed", phase: anyFailed ? "Needs attention" : "Completed", summary: text, needs: null, updated_at: now() });
   await ins("messages", { role: "assistant", content: `✅ ${t.title}: ${text}` }).catch(() => null);
   await audit("mission", anyFailed ? "mission_failed" : "mission_done", t.title, anyFailed ? "failed" : "done");
-  if (!anyFailed) await nextMoves(t, digest).catch(() => null);
+  if (!anyFailed) await nextMoves(t, digest).catch((e) => audit("system", "next_moves_failed", (e as Error).message, "failed"));
 }
 
 /** Proactive: after a mission, NOVA proposes the next 3 moves. With Autopilot on, she starts the top one herself (chains up to 2 deep). */
