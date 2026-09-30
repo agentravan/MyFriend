@@ -8,10 +8,12 @@ import Boot from "@/components/Boot";
 import ActionCard, { launch, via } from "@/components/ActionCard";
 import { Action, INTERNAL } from "@/lib/actions";
 import type { Snapshot } from "@/lib/db";
-import type { Analysis } from "@/lib/market";
+import type { Analysis, Pnl } from "@/lib/market";
+import Md from "@/components/Md";
+import Viewer, { FileMeta } from "@/components/Viewer";
 
 type View = "nova" | "missions" | "files";
-type Sheet = "voice" | "phone" | "markets" | "money" | "memory" | "approvals" | "system" | null;
+type Sheet = "voice" | "phone" | "activity" | "markets" | "money" | "memory" | "approvals" | "system" | null;
 type Timer = { id: number; label: string; end: number };
 type Attach = { name: string; text?: string; b64?: string };
 type Confirm = { label: string; run: () => void } | null;
@@ -54,6 +56,7 @@ export default function Home() {
   const [attach, setAttach] = useState<Attach | null>(null), [confirm, setConfirm] = useState<Confirm>(null);
   const [timers, setTimers] = useState<Timer[]>([]), [clock, setClock] = useState("");
   const [card, setCard] = useState<Analysis | null>(null), [checks, setChecks] = useState<boolean[]>([]), [thesis, setThesis] = useState("");
+  const [viewing, setViewing] = useState<FileMeta | null>(null), [pnl, setPnl] = useState<Pnl | null>(null);
   const [reasons, setReasons] = useState<Record<number, string>>({}), [needInput, setNeedInput] = useState(""), [hookUrl, setHookUrl] = useState("");
   const speakRef = useRef<(t: string) => void>(() => {}), confirmRef = useRef<Confirm>(null), prevStatus = useRef<Record<number, string>>({});
   const ticking = useRef(false), greeted = useRef(false), fileRef = useRef<HTMLInputElement>(null), feedRef = useRef<HTMLDivElement>(null);
@@ -225,6 +228,8 @@ export default function Home() {
         <div className="top-r">
           <span className="clock">{clock}</span>
           {linked && <span className="tag-ok" title="Phone Link connected">📱</span>}
+          <button className={`icon power ${s && !s.power.on ? "off" : ""}`} title={s?.power.on === false ? "Resume NOVA" : "Master stop — freeze every action"}
+            onClick={async () => { const j = await run({ action: "power", on: s?.power.on === false }); if (j?.reply) say(j.reply); }}>⏻</button>
           <button className={`chip-btn ${mission ? "on" : ""}`} onClick={() => { setMission(!mission); ls.set("nova_mission", !mission); }} title="Mission mode: every command becomes an autonomous mission">🎯<span> Mission</span></button>
           <button className="icon" onClick={() => { setTalk(!talk); ls.set("nova_talk", !talk); if (talk) v.stopSpeaking(); }} title={talk ? "Mute voice" : "Unmute voice"}>{talk ? "🔊" : "🔇"}</button>
           <button className="icon" onClick={() => openSheet("voice")} title="Settings">⚙</button>
@@ -233,6 +238,8 @@ export default function Home() {
       <div className="banners">
         {err && <div className="banner bad" onClick={() => setErr("")}>{err} <b>✕</b></div>}
         {!err && health && !brainOk && <div className="banner bad" onClick={() => openSheet("system")}>AI brain offline — {brains.map(([k, x]) => `${k}: ${x}`).join(" · ") || "no keys"}. Tap for details.</div>}
+        {s && !s.power.on && <div className="banner bad"><span>⏻ NOVA is paused — no calls, messages or missions will run.</span>
+          <button className="primary" onClick={async () => { const j = await run({ action: "power", on: true }); if (j?.reply) say(j.reply); }}>Resume</button></div>}
         {confirm && <div className="banner ask"><span>{confirm.label}</span><span className="row">
         <button className="primary" onClick={() => { const c = confirm; setConfirm(null); c.run(); }}>Yes</button><button onClick={() => setConfirm(null)}>No</button></span></div>}
 
@@ -251,7 +258,7 @@ export default function Home() {
             </div>
           </div>
           <nav className="modules">
-            {([["markets", "📈", "Markets"], ["money", "₹", "Money"], ["memory", "🧠", "Memory"], ["approvals", "✓", "Ideas"], ["phone", "📱", "Phone"]] as [Sheet, string, string][])
+            {([["activity", "⚡", "Activity"], ["markets", "📈", "Markets"], ["money", "₹", "Money"], ["memory", "🧠", "Memory"], ["approvals", "✓", "Ideas"], ["phone", "📱", "Phone"]] as [Sheet, string, string][])
               .map(([k, ic, l]) => <button key={l} onClick={() => openSheet(k)}><span>{ic}</span>{l}{k === "approvals" && !!s?.metrics.pending && <em>{s.metrics.pending}</em>}</button>)}
           </nav>
         </aside>
@@ -277,7 +284,7 @@ export default function Home() {
               <div className="suggest">{SUGGEST.map((x) => <button key={x} onClick={() => send(x)}>{x}</button>)}</div></div>}
             {msgs.map((m, i) => (
               <div key={m.id} className={`msg ${m.role}`}>
-                <p>{m.content}</p>
+                {m.role === "assistant" ? <Md text={m.content} /> : <p>{m.content}</p>}
                 {i === msgs.length - 1 && m.role === "assistant" && live && <div className="acts">{live.actions.map((a, k) =>
                   <ActionCard key={live.key + "-" + k} a={a} auto={live.auto && a === live.actions.find((y) => !INTERNAL.has(y.kind) && !via(y))}
                     onContact={(name, phone) => run({ action: "contact", name, phone })}
@@ -311,14 +318,22 @@ export default function Home() {
           ))}
           {!!timers.length && <div className="card">{timers.map((t) => { const l = Math.max(0, Math.round((t.end - Date.now()) / 1000));
             return <p key={t.id} className="timer"><b>{Math.floor(l / 60)}:{String(l % 60).padStart(2, "0")}</b> {t.label}</p>; })}</div>}
+          {!!s?.metrics.nextMoves && <div className="card">
+            <div className="card-h"><h2>Next moves</h2><span>{s.power.autopilot ? "Autopilot on" : "tap ▶ to run"}</span></div>
+            {s.proposals.filter((p) => p.kind === "next" && p.status === "pending").slice(0, 3).map((p) => (
+              <div key={p.id} className="move"><div><b>{p.title}</b><small>{p.body}</small></div>
+                <button className="primary" title="Start this mission" onClick={() => { run({ action: "decide", id: p.id, approve: true }); say("On it, Boss."); }}>▶</button>
+                <button className="x" title="Not now" onClick={() => run({ action: "decide", id: p.id, approve: false, reason: "Not now" })}>✕</button></div>))}
+          </div>}
           <div className="card grow">
             <div className="card-h"><h2>Files</h2><span>{files.length}</span></div>
             <div className="list">
-              {!files.length && <p className="muted">Reports, dashboards and lead sheets appear here, ready to open or download.</p>}
+              {!files.length && <p className="muted">Reports, dashboards and lead sheets appear here — tap to view them right on screen.</p>}
               {files.map((f) => (
-                <div key={f.id} className="file"><span>{FILE_IC(f.mime)}</span>
+                <div key={f.id} className="file" onClick={() => setViewing(f as FileMeta)} role="button" tabIndex={0}><span>{FILE_IC(f.mime)}</span>
                   <div><b title={f.name}>{f.name}</b><small>{kb(f.size)} · {fmtIST(f.created_at)}</small></div>
-                  <a href={`/api/files/${f.id}`} target="_blank" title="Open">↗</a><a href={`/api/files/${f.id}?dl=1`} title="Download">⤓</a>
+                  <a onClick={(e) => { e.preventDefault(); e.stopPropagation(); setViewing(f as FileMeta); }} href="#" title="View on screen">👁</a>
+                  <a onClick={(e) => e.stopPropagation()} href={`/api/files/${f.id}?dl=1`} title="Download (optional)">⤓</a>
                 </div>))}
             </div>
           </div>
@@ -333,12 +348,13 @@ export default function Home() {
         <button onClick={() => openSheet("voice")}><span>⚙</span>Settings</button>
       </nav>
 
+      {viewing && <Viewer file={viewing} onClose={() => setViewing(null)} />}
       {/* ───── Settings sheet ───── */}
       {sheet && (
         <div className="scrim" onClick={() => setSheet(null)}>
           <div className="sheet" onClick={(e) => e.stopPropagation()}>
             <div className="sheet-tabs">
-              {([["voice", "Voice"], ["phone", "Phone"], ["markets", "Markets"], ["money", "Money"], ["memory", "Memory"], ["approvals", "Ideas"], ["system", "System"]] as [Sheet, string][])
+              {([["activity", "Activity"], ["voice", "Voice"], ["phone", "Phone"], ["markets", "Markets"], ["money", "Money"], ["memory", "Memory"], ["approvals", "Ideas"], ["system", "System"]] as [Sheet, string][])
                 .map(([k, l]) => <button key={l} className={sheet === k ? "on" : ""} onClick={() => openSheet(k)}>{l}</button>)}
               <button className="close" onClick={() => setSheet(null)}>✕</button>
             </div>
@@ -360,6 +376,22 @@ export default function Home() {
                 <div className="row"><button className="primary" onClick={() => v.speak(greeting())}>▶ Test voice</button>
                   <label className="toggle inline"><input type="checkbox" checked={direct} onChange={() => { setDirect(!direct); ls.set("nova_direct", !direct); }} /><span>Open apps instantly</span></label></div>
                 <p className="muted">Wake word: say <b>“NOVA”</b> then your command, in Hinglish or English. Works in Chrome/Edge while NOVA is open. Shortcut: Alt+N.</p>
+              </>}
+
+              {sheet === "activity" && s && <>
+                <h3>Control</h3>
+                <label className="toggle"><input type="checkbox" checked={s.power.on} onChange={async (e) => { const j = await run({ action: "power", on: e.target.checked }); if (j?.reply) say(j.reply); }} />
+                  <span><b>NOVA active</b><small>Master switch. Off = every call, message, phone action and mission is frozen instantly.</small></span></label>
+                <label className="toggle"><input type="checkbox" checked={s.power.autopilot} onChange={(e) => run({ action: "autopilot", on: e.target.checked })} />
+                  <span><b>Autopilot</b><small>After each mission NOVA starts her top “next move” by herself (research, drafts, sheets, dashboards — never sends or pays). Chains up to 2 missions deep.</small></span></label>
+                <h3>What NOVA learned <small>{s.learnings.length}</small></h3>
+                {!s.learnings.length && <p className="muted">Teach her: “NOVA, learn: lead sheets must have a decision-maker name”. Every mission follows these.</p>}
+                {s.learnings.map((l) => <p key={l.id} className="small"><span className="chip">{l.scope}</span> {l.rule} <X onClick={() => run({ action: "delete", table: "learnings", id: l.id })} /></p>)}
+                <h3>Activity log <small>permanent · {s.audit.length} latest</small></h3>
+                <div className="audit">{s.audit.map((a) => <div key={a.id} className={`au ${a.status}`}>
+                  <span className="t">{fmtIST(a.at)}</span><span className="src">{a.source}</span><span className="d"><b>{a.kind.replace(/_/g, " ")}</b> {a.detail}</span>
+                  <span className="st">{a.status === "done" ? "✓" : a.status === "awaiting" ? "…" : a.status === "blocked" ? "⏻" : "✗"}</span></div>)}
+                  {!s.audit.length && <p className="muted">Every call, message, mission and file NOVA touches is recorded here.</p>}</div>
               </>}
 
               {sheet === "phone" && <>
@@ -403,9 +435,18 @@ export default function Home() {
                   {CHECKS.map((c, i) => <label key={c} className="check"><input type="checkbox" checked={!!checks[i]} onChange={(e) => { const n = [...checks]; n[i] = e.target.checked; setChecks(n); }} /> {c}</label>)}
                   <input placeholder="Why this trade?" value={thesis} onChange={(e) => setThesis(e.target.value)} />
                   <button className="primary" disabled={CHECKS.some((_, i) => !checks[i]) || !thesis.trim()} onClick={async () => { await run({ action: "paper", symbol: card.symbol, thesis }); setCard(null); }}>Log paper trade</button></>}
-                <h4>Paper journal</h4>
-                {s?.trades.slice(0, 8).map((t) => <p key={t.id} className="small"><b>{t.symbol}</b> {t.entry} → SL {t.stop} / T {t.target} · {t.status}</p>)}
-                {!s?.trades.length && <p className="muted">No paper trades yet.</p>}
+                <h3>Paper P&amp;L scorecard <button className="link" onClick={() => call("/api/agent?pnl=1").then(setPnl).catch((e) => setErr(e.message))}>{pnl ? "↻ Refresh" : "Load live P&L"}</button></h3>
+                {pnl ? <>
+                  <div className="stats four"><div><small>Realised</small><b className={pnl.summary.realised >= 0 ? "up" : "down"}>{inr(pnl.summary.realised)}</b></div>
+                    <div><small>Open (marked)</small><b className={pnl.summary.unrealised >= 0 ? "up" : "down"}>{inr(pnl.summary.unrealised)}</b></div>
+                    <div><small>Win rate</small><b>{pnl.summary.winRate == null ? "—" : pnl.summary.winRate + "%"}</b></div>
+                    <div><small>Avg R</small><b>{pnl.summary.avgR ?? "—"}</b></div></div>
+                  <div className="md-table"><table><thead><tr><th>Stock</th><th>Entry</th><th>Now/Exit</th><th>P&amp;L</th><th>R</th><th>Status</th></tr></thead>
+                    <tbody>{pnl.rows.map((r) => <tr key={r.id}><td><b>{r.symbol}</b></td><td>{r.entry}</td><td>{r.price ?? "—"}</td>
+                      <td className={(r.pnl ?? 0) >= 0 ? "up" : "down"}>{r.pnl == null ? "—" : `${inr(r.pnl)} (${r.pnlPct}%)`}</td><td>{r.r ?? "—"}</td><td>{r.status}</td></tr>)}</tbody></table></div>
+                  <p className="muted small">Each paper trade = ₹{pnl.notional.toLocaleString("en-IN")} notional · delayed prices · practice only, no real money moves.</p>
+                </> : <>{s?.trades.slice(0, 8).map((t) => <p key={t.id} className="small"><b>{t.symbol}</b> {t.entry} → SL {t.stop} / T {t.target} · {t.status}</p>)}
+                  {!s?.trades.length && <p className="muted">No paper trades yet. Analyse a stock, tick the checklist, log a paper trade — NOVA scores it daily.</p>}</>}
               </>}
 
               {sheet === "money" && <>
@@ -429,8 +470,8 @@ export default function Home() {
 
               {sheet === "approvals" && <>
                 <h3>Ideas & improvements</h3>
-                {!s?.proposals.some((p) => p.status === "pending") && <p className="muted">Nothing waiting. Say “business ideas batao”.</p>}
-                {s?.proposals.filter((p) => p.status === "pending").map((p) => (
+                {!s?.proposals.some((p) => p.status === "pending" && p.kind !== "next") && <p className="muted">Nothing waiting. Say “business ideas batao”.</p>}
+                {s?.proposals.filter((p) => p.status === "pending" && p.kind !== "next").map((p) => (
                   <div key={p.id} className="prop"><b>{p.title}</b><p>{p.body}</p>
                     {p.kind === "addendum" && <details><summary>Before / after test</summary><p className="small"><b>Before:</b> {p.payload.before}</p><p className="small"><b>After:</b> {p.payload.after}</p></details>}
                     <input placeholder="Reason (needed to reject)" value={reasons[p.id] ?? ""} onChange={(e) => setReasons({ ...reasons, [p.id]: e.target.value })} />
@@ -446,7 +487,8 @@ export default function Home() {
                 <SysRow ok k="Missions" v="Run in the background every minute, even when NOVA is closed" />
                 <SysRow ok={linked} k="Phone Link" v={linked ? "Connected via MacroDroid" : "Not connected — see Phone tab"} />
                 <SysRow ok={v.supported} k="Voice" v="Chrome / Edge · screen kept awake while listening" />
-                <SysRow k="Payments" v="Never — by design" />
+                <SysRow ok={s?.power.on} k="Master switch" v={s?.power.on ? "Active" : "Paused — nothing runs"} />
+                <SysRow k="Payments / real trades" v="Never — by design" />
                 <div className="row"><button onClick={() => "Notification" in window && Notification.requestPermission()}>Enable notifications</button><a className="btn" href="/api/agent?export=1">Export backup</a></div>
               </>}
             </div>

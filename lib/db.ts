@@ -35,11 +35,13 @@ export async function snapshot() {
     sel("reminders", "done=eq.false&order=due_at.asc&limit=50"),
     sel("actions", "order=at.desc&limit=30"),
   ]);
-  const [tasks, files, settings, events] = await Promise.all([
+  const [tasks, files, settings, events, audit, learnings] = await Promise.all([
     sel("tasks", "select=id,title,goal,kind,status,phase,summary,needs,created_at,updated_at&order=updated_at.desc&limit=25"),
     sel("files", "select=id,task_id,name,mime,size,created_at&order=created_at.desc&limit=40"),
-    sel("settings", "key=in.(phone_webhook,device_key)").catch(() => []),
+    sel("settings", "key=in.(phone_webhook,device_key,nova_enabled,autopilot)").catch(() => []),
     sel("device_events", "seen=eq.false&order=at.desc&limit=5").catch(() => []),
+    sel("audit", "select=id,at,source,kind,detail,status&order=at.desc&limit=80").catch(() => []),
+    sel("learnings", "active=eq.true&order=at.desc&limit=50").catch(() => []),
   ]);
   const cfg = Object.fromEntries(settings.map((x) => [x.key, x.value]));
   const steps = tasks.length ? await sel("steps", `select=id,task_id,idx,agent,title,status,manual,instruction&task_id=in.(${tasks.slice(0, 8).map((t) => t.id).join(",")})&order=idx.asc`) : [];
@@ -48,10 +50,12 @@ export async function snapshot() {
   const monthLedger = ledger.filter((l) => String(l.at).startsWith(month));
   return {
     messages: messages.reverse(), proposals, trades, ledger, memory, addenda, watchlist, digest: digests[0] ?? null,
-    contacts, reminders, actions, tasks, steps, files, events,
+    contacts, reminders, actions, tasks, steps, files, events, audit, learnings,
+    power: { on: cfg.nova_enabled !== "off", autopilot: cfg.autopilot === "on" },
     phone: { linked: !!cfg.phone_webhook, deviceKey: (cfg.device_key as string) ?? null },
     metrics: {
-      pending: proposals.filter((p) => p.status === "pending").length,
+      pending: proposals.filter((p) => p.status === "pending" && p.kind !== "next").length,
+      nextMoves: proposals.filter((p) => p.status === "pending" && p.kind === "next").length,
       activeTasks: tasks.filter((t) => ["planning", "running"].includes(t.status)).length,
       waiting: tasks.filter((t) => t.status === "waiting_user").length,
       delivered: files.length,

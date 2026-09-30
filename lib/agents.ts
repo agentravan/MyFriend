@@ -4,6 +4,7 @@ import { llm, parseJSON } from "@/lib/llm";
 import { ins, sel, upd, Row } from "@/lib/db";
 import { read, search, Hit } from "@/lib/web";
 import { persona } from "@/lib/nova";
+import { audit, autopilot, enabled } from "@/lib/guard";
 
 export const AGENTS = ["research", "business", "hr", "data", "coding", "testing", "document", "communication", "manual"] as const;
 export type Agent = (typeof AGENTS)[number];
@@ -46,13 +47,14 @@ export async function planTask(t: Row) {
 }
 
 // ───────────────────────────── Agents ─────────────────────────────
-type Ctx = { task: Row; step: Row; prior: string; system: string };
+type Ctx = { task: Row; step: Row; prior: string; system: string; learn?: string };
 type Out = { output: string; files?: { name: string; mime: string; content: string }[]; waitUser?: string };
 
 const context = (c: Ctx) =>
   `TASK GOAL: ${c.task.goal}\nCURRENT STEP (${AGENT_LABEL[c.step.agent]}): ${c.step.title}\nINSTRUCTION: ${c.step.instruction}\n` +
   (c.task.attachment ? `\nATTACHED FILE:\n${String(c.task.attachment).slice(0, 12000)}\n` : "") +
-  (c.prior ? `\nRESULTS FROM EARLIER STEPS:\n${c.prior}` : "");
+  (c.prior ? `\nRESULTS FROM EARLIER STEPS:\n${c.prior}` : "") +
+  (c.learn ? `\n\nLESSONS FROM THE BOSS (always follow):\n${c.learn}` : "");
 
 const slug = (s: string) => s.toLowerCase().replace(/[^a-z0-9]+/g, "-").slice(0, 36).replace(/^-+|-+$/g, "") || "nova";
 
@@ -112,10 +114,40 @@ async function data(c: Ctx): Promise<Out> {
   const cols = t.columns?.length ? t.columns : [];
   const rows = (t.rows ?? []).filter((r) => Array.isArray(r) && r.some((v) => String(v ?? "").trim()));
   if (!cols.length || !rows.length) throw new Error("Data Agent returned no table");
+  const verified = await verifySites(cols, rows);
+  if (verified) cols.push("Website check");
   const cell = (v: unknown) => { const x = String(v ?? "").replace(/^(not (available|shown)( in source)?|n\/a|-|–)$/i, "").trim(); return /[",\n]/.test(x) ? `"${x.replace(/"/g, '""')}"` : x; };
   const csv = "\uFEFF" + [cols, ...rows.map((r) => cols.map((_, i) => r[i]))].map((r) => r.map(cell).join(",")).join("\r\n");
-  return { output: `Built a table with ${rows.length} rows and ${cols.length} columns: ${cols.join(", ")}.`,
+  return { output: `Built a table with ${rows.length} rows and ${cols.length} columns: ${cols.join(", ")}.${verified ? ` Websites checked: ${verified}.` : ""}`,
     files: [{ name: `${slug(c.task.title)}-table.csv`, mime: "text/csv", content: csv }] };
+}
+
+/** Lead accuracy: open every website in the table and check it is live and actually mentions the company. Appends a result cell per row. */
+async function verifySites(cols: string[], rows: unknown[][]) {
+  const w = cols.findIndex((c) => /website|url|domain|site/i.test(c));
+  if (w < 0) return "";
+  const n = Math.max(0, cols.findIndex((c) => /name|company|organi[sz]ation|business|firm/i.test(c)));
+  const words = (name: string) => name.toLowerCase().replace(/\b(pvt|private|ltd|limited|llp|inc|india|the|co|company|group|industries|and)\b/g, " ")
+    .split(/[^a-z0-9]+/).filter((x) => x.length > 2);
+  const check = async (r: unknown[]) => {
+    let url = String(r[w] ?? "").trim();
+    if (!url) return "no website";
+    if (!/^https?:\/\//i.test(url)) url = "https://" + url;
+    const keys = words(String(r[n] ?? ""));
+    try {
+      const host = new URL(url).hostname.replace(/^www\./, "");
+      const res = await fetch(url, { redirect: "follow", signal: AbortSignal.timeout(8000), headers: { "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) Chrome/126 Safari/537.36" } });
+      if (!res.ok && res.status !== 403) return `✗ site error ${res.status}`;
+      const text = res.ok ? (await res.text()).slice(0, 200000).toLowerCase() : "";
+      const hit = keys.some((k) => host.includes(k) || text.includes(k));
+      return res.status === 403 ? (keys.some((k) => host.includes(k)) ? "✓ live (bot-protected)" : "? bot-protected, verify") : hit ? "✓ verified" : "⚠ name not on site — check";
+    } catch { return "✗ unreachable"; }
+  };
+  const out: string[] = [];
+  for (let i = 0; i < rows.length; i += 8) out.push(...(await Promise.all(rows.slice(i, i + 8).map(check))));
+  rows.forEach((r, i) => { while (r.length < cols.length) r.push(""); r.push(out[i]); });
+  const ok = out.filter((x) => x.startsWith("✓")).length, bad = out.filter((x) => /^[✗⚠?]/.test(x)).length;
+  return `${ok} verified, ${bad} need a look`;
 }
 
 const md2html = (md: string, title: string) => {
@@ -192,6 +224,7 @@ const RUN: Record<string, (c: Ctx) => Promise<Out>> = {
 
 // ───────────────────────────── Tick ─────────────────────────────
 export async function tick(): Promise<string> {
+  if (!(await enabled())) return "paused";
   // 1) Plan any new task (atomic claim: planning → running)
   const [fresh] = await sel("tasks", "status=eq.planning&order=created_at.asc&limit=1");
   if (fresh) {
@@ -220,21 +253,23 @@ export async function tick(): Promise<string> {
     const prior = steps.filter((s) => s.status === "done" && s.output)
       .map((s) => `## ${s.title} (${AGENT_LABEL[s.agent]})\n${s.user_input ? `User provided: ${s.user_input}\n` : ""}${String(s.output).slice(0, 3500)}`).join("\n\n").slice(-12000);
     try {
-      const { system } = await persona();
-      const out = await RUN[next.agent]({ task: t, step: next, prior, system });
+      const [{ system }, lessons] = await Promise.all([persona(), sel("learnings", "active=eq.true&order=at.desc&limit=25").catch(() => [])]);
+      const learn = lessons.map((l) => `- [${l.scope}] ${l.rule}`).join("\n");
+      const out = await RUN[next.agent]({ task: t, step: next, prior, system, learn });
       if (out.waitUser) {
         await upd("steps", `id=eq.${next.id}`, { status: "waiting_user" });
         await upd("tasks", `id=eq.${t.id}`, { status: "waiting_user", phase: "Waiting for you", needs: out.waitUser, updated_at: now() });
         return `waiting ${t.id}`;
       }
-      for (const f of out.files ?? []) await ins("files", { task_id: t.id, ...f, size: f.content.length });
+      for (const f of out.files ?? []) { await ins("files", { task_id: t.id, ...f, size: f.content.length }); await audit("mission", "file", `${t.title} → ${f.name}`); }
       await upd("steps", `id=eq.${next.id}`, { status: "done", output: out.output, finished_at: now() });
       await upd("tasks", `id=eq.${t.id}`, { updated_at: now() });
       return `step ${next.id} done`;
     } catch (e) {
       const failed = next.attempts + 1 >= 3;
       await upd("steps", `id=eq.${next.id}`, { status: failed ? "failed" : "pending", output: `Error: ${(e as Error).message}` });
-      if (failed) await upd("tasks", `id=eq.${t.id}`, { status: "failed", phase: "Needs attention", summary: `${next.title} failed: ${(e as Error).message}`, updated_at: now() });
+      if (failed) { await upd("tasks", `id=eq.${t.id}`, { status: "failed", phase: "Needs attention", summary: `${next.title} failed: ${(e as Error).message}`, updated_at: now() });
+        await audit("mission", "mission_failed", `${t.title}: ${next.title} — ${(e as Error).message}`, "failed"); }
       return `step ${next.id} error`;
     }
   }
@@ -249,6 +284,25 @@ async function finalize(t: Row, steps: Row[]) {
   const anyFailed = steps.some((s) => s.status === "failed");
   await upd("tasks", `id=eq.${t.id}`, { status: anyFailed ? "failed" : "completed", phase: anyFailed ? "Needs attention" : "Completed", summary: text, needs: null, updated_at: now() });
   await ins("messages", { role: "assistant", content: `✅ ${t.title}: ${text}` }).catch(() => null);
+  await audit("mission", anyFailed ? "mission_failed" : "mission_done", t.title, anyFailed ? "failed" : "done");
+  if (!anyFailed) await nextMoves(t, digest).catch(() => null);
+}
+
+/** Proactive: after a mission, NOVA proposes the next 3 moves. With Autopilot on, she starts the top one herself (chains up to 2 deep). */
+async function nextMoves(t: Row, digest: string) {
+  const { text } = await llm({ system: "You are NOVA, an autonomous business operator for a solo HR/payroll founder in Gurugram. Output JSON only.", json: true, maxTokens: 700, prefer: "fast",
+    msgs: [{ role: "user", content: `A mission just finished.\nTitle: ${t.title}\nGoal: ${t.goal}\nWhat was done:\n${digest.slice(0, 3500)}\n\n` +
+      `Propose the next 3 missions that move the Boss closest to revenue, most valuable first. Each must be doable by NOVA's agents (research, analysis, data tables, drafts, documents, dashboards) — never sending, paying or logging in. ` +
+      `JSON: {"moves":[{"title":"<6-10 words>","goal":"<full self-contained mission goal in English>","why":"<one line>"}]}` }] });
+  const moves = parseJSON<{ moves?: { title: string; goal: string; why?: string }[] }>(text, {}).moves?.filter((m) => m?.goal).slice(0, 3) ?? [];
+  if (!moves.length) return;
+  const depth = Number(t.depth ?? 0);
+  const rows = await ins("proposals", moves.map((m) => ({ kind: "next", title: m.title.slice(0, 90), body: m.why ?? "", payload: { goal: m.goal, from: t.id, depth: depth + 1 } })));
+  if (depth < 2 && (await autopilot())) {
+    const [first] = rows;
+    await upd("proposals", `id=eq.${first.id}`, { status: "approved", reason: "Autopilot", decided_at: now() });
+    await createTask(first.payload.goal, undefined, { source: "autopilot", depth: depth + 1 });
+  }
 }
 
 export async function resume(taskId: number, input: string) {
@@ -257,7 +311,9 @@ export async function resume(taskId: number, input: string) {
   await upd("tasks", `id=eq.${taskId}&status=eq.waiting_user`, { status: "running", needs: null, phase: "Resuming", updated_at: now() });
 }
 
-export async function createTask(goal: string, attachment?: string) {
-  const [t] = await ins("tasks", { title: goal.slice(0, 90), goal: goal.slice(0, 4000), attachment: attachment?.slice(0, 60000) ?? null });
+export async function createTask(goal: string, attachment?: string, o: { source?: "chat" | "voice" | "autopilot" | "mission"; depth?: number } = {}) {
+  if (!(await enabled())) { await audit(o.source ?? "chat", "mission_start", goal.slice(0, 200), "blocked"); throw new Error("NOVA is paused — press ⏻ Resume first."); }
+  const [t] = await ins("tasks", { title: goal.slice(0, 90), goal: goal.slice(0, 4000), attachment: attachment?.slice(0, 60000) ?? null, depth: o.depth ?? 0 });
+  await audit(o.source ?? "chat", "mission_start", goal.slice(0, 200));
   return t;
 }

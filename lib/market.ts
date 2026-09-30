@@ -95,3 +95,32 @@ export async function score(t: { symbol: string; stop: number; target: number; o
   }
   return null;
 }
+
+/** Paper-trading scorecard: every paper trade marked to the latest (delayed) price. Each trade is a notional ₹10,000 position. */
+export async function paperPnl() {
+  const { sel } = await import("@/lib/db");
+  const trades = await sel("trades", "order=opened_at.desc&limit=60");
+  const NOTIONAL = 10000;
+  const last: Record<string, number> = {};
+  await Promise.all([...new Set(trades.filter((t) => t.status === "open").map((t) => t.symbol as string))].map(async (s) => {
+    try { const { bars: b } = await bars(s, "5d"); last[s] = b[b.length - 1].c; } catch { /* no quote */ }
+  }));
+  const rows = trades.map((t) => {
+    const entry = +t.entry, stop = +t.stop, risk = entry - stop;
+    const px = t.status === "open" ? last[t.symbol] : +t.exit;
+    const pct = px ? ((px - entry) / entry) * 100 : null;
+    return { id: t.id as number, symbol: t.symbol as string, status: t.status as string, entry, stop, target: +t.target, price: px ? r2(px) : null,
+      pnlPct: pct == null ? null : r2(pct), pnl: pct == null ? null : Math.round((NOTIONAL * pct) / 100),
+      r: px && risk > 0 ? r2((px - entry) / risk) : null, opened: t.opened_at as string };
+  });
+  const closed = rows.filter((x) => x.status !== "open"), wins = closed.filter((x) => x.status === "win").length;
+  const sum = (a: typeof rows) => a.reduce((s, x) => s + (x.pnl ?? 0), 0);
+  const withR = closed.filter((x) => x.r != null);
+  return { rows, notional: NOTIONAL, summary: {
+    trades: rows.length, open: rows.length - closed.length, closed: closed.length,
+    winRate: closed.length ? Math.round((wins / closed.length) * 100) : null,
+    realised: sum(closed), unrealised: sum(rows.filter((x) => x.status === "open")),
+    avgR: withR.length ? r2(withR.reduce((s, x) => s + (x.r ?? 0), 0) / withR.length) : null,
+  } };
+}
+export type Pnl = Awaited<ReturnType<typeof paperPnl>>;

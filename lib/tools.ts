@@ -4,6 +4,8 @@ import { Action, sanitize } from "@/lib/actions";
 import { ins, sel } from "@/lib/db";
 import { createTask } from "@/lib/agents";
 import { phone, setting, PhoneOp } from "@/lib/phone";
+import { audit, enabled } from "@/lib/guard";
+import { describe } from "@/lib/actions";
 
 const nowIST = () => new Date().toLocaleString("en-IN", { timeZone: "Asia/Kolkata", dateStyle: "full", timeStyle: "short" });
 
@@ -65,6 +67,12 @@ export async function weather(place: string) {
 /** Resolve names → numbers from saved contacts, persist internal actions. Returns extra reply text. */
 export async function execServer(actions: Action[], opt: { voice?: boolean } = {}) {
   const notes: string[] = [];
+  const src = opt.voice ? "voice" : "chat";
+  if (actions.length && !(await enabled())) {
+    for (const a of actions.filter((x) => (x as { via?: string }).via !== "phone")) await audit(src, a.kind, describe(a), "blocked");
+    actions.splice(0, actions.length);
+    return "NOVA abhi paused hai, Boss — ⏻ Resume dabao, phir main kar dungi.";
+  }
   const linked = !!(await setting("phone_webhook").catch(() => undefined));
   for (const a of actions) {
     if ((a.kind === "whatsapp" || a.kind === "call" || a.kind === "sms") && !a.phone && a.name) {
@@ -86,10 +94,11 @@ export async function execServer(actions: Action[], opt: { voice?: boolean } = {
     if (a.kind === "reminder") await ins("reminders", { text: a.text, due_at: a.due_at });
     if (a.kind === "task") {
       if (opt.voice) tag.via = "confirm"; // spoken → Boss confirms before any work starts
-      else { const t = await createTask(a.goal); (a as { id?: number }).id = t.id; }
+      else { const t = await createTask(a.goal, undefined, { source: "chat" }); (a as { id?: number }).id = t.id; }
     }
     if (a.kind === "weather") notes.push(await weather(a.place || "Gurugram").catch(() => "Weather service abhi respond nahi kar rahi."));
   }
+  for (const a of actions.filter((x) => (x as { via?: string }).via !== "phone")) await audit(src, a.kind, describe(a), (a as { via?: string }).via === "confirm" || (a as { via?: string }).via === "phone-confirm" ? "awaiting" : "done", a);
   if (actions.length) await ins("actions", actions.map((a) => ({ kind: a.kind, payload: a }))).catch(() => null);
   return notes.join(" ");
 }

@@ -3,6 +3,7 @@ import { NextResponse } from "next/server";
 import { createTask, resume, tick } from "@/lib/agents";
 import { upd } from "@/lib/db";
 import { snapshot } from "@/lib/db";
+import { audit } from "@/lib/guard";
 
 export const maxDuration = 300;
 export const dynamic = "force-dynamic";
@@ -25,12 +26,12 @@ export async function POST(req: Request) {
     let out: Record<string, unknown> = {};
     switch (b.action) {
       case "create": {
-        const t = await createTask(String(b.goal ?? "").trim(), await extract(b.file));
+        const t = await createTask(String(b.goal ?? "").trim(), await extract(b.file), { source: b.voice ? "voice" : "chat" });
         out = { task: t, reply: "Sure Boss, I'm on it." }; break;
       }
       case "tick": out = { tick: await tick() }; break;
       case "resume": await resume(Number(b.id), String(b.input ?? "")); break;
-      case "cancel": await upd("tasks", `id=eq.${Number(b.id)}`, { status: "cancelled", phase: "Cancelled", updated_at: new Date().toISOString() }); break;
+      case "cancel": await audit("chat", "mission_stopped", `Mission #${Number(b.id)} stopped by Boss`); await upd("tasks", `id=eq.${Number(b.id)}`, { status: "cancelled", phase: "Cancelled", updated_at: new Date().toISOString() }); break;
       case "retry":
         await upd("steps", `task_id=eq.${Number(b.id)}&status=eq.failed`, { status: "pending", attempts: 0 });
         await upd("tasks", `id=eq.${Number(b.id)}`, { status: "running", phase: "Retrying", updated_at: new Date().toISOString() }); break;

@@ -6,7 +6,10 @@ import { plan, execServer } from "@/lib/tools";
 import { analyze, findSymbol } from "@/lib/market";
 import { del, ins, sel, snapshot, upd } from "@/lib/db";
 import { generateIdeas, persona, runDaily } from "@/lib/nova";
-import { linkPhone, phone, PhoneOp } from "@/lib/phone";
+import { linkPhone, phone, PhoneOp, setSetting } from "@/lib/phone";
+import { audit, resetFlags } from "@/lib/guard";
+import { createTask } from "@/lib/agents";
+import { paperPnl } from "@/lib/market";
 
 export const maxDuration = 60;
 export const dynamic = "force-dynamic";
@@ -14,6 +17,7 @@ export const dynamic = "force-dynamic";
 const has = (re: RegExp, s: string) => re.test(s);
 const R = {
   remember: /(remember that|remember:|yaad rakh|याद रख)/i,
+  learn: /^(nova[,\s]+)?((learn|lesson|rule|seekh(o| lo| lena)?)\s*:|seekh lo\b|next time\b|agli baar\b|galti mat\b)\s*,?\s*/i,
   money: /(₹|\brs\.?|rupe(e|es|y)|रुपय|रुपये|रुपए)\s*([\d,]+(\.\d+)?)|([\d,]+(\.\d+)?)\s*(₹|rs\b|rupe(e|es)|रुपय|रुपये|रुपए)/i,
   expense: /(expense|spent|kharch|kharcha|diya|paid|bill|खर्च|दिया)/i,
   income: /(income|earned|kamaya|kamai|mila|received|got paid|कमाई|मिला)/i,
@@ -29,6 +33,14 @@ async function handle(text: string, voice = false) {
     const fact = text.replace(/.*?(remember that|remember:|yaad rakhna|yaad rakho|yaad rakh|याद रखना|याद रखो|याद रख)\s*(ki|कि)?/i, "").trim() || text;
     await ins("memory", { fact });
     return { reply: `Done Boss, yaad rakh liya: "${fact}".` };
+  }
+  // 1b) Learnings — the Boss teaches NOVA a rule every agent follows from now on
+  if (has(R.learn, text) && text.replace(R.learn, "").trim().length > 8) {
+    const rule = text.replace(R.learn, "").trim().slice(0, 300);
+    const scope = /lead|client|website|company|prospect/i.test(rule) ? "leads" : /research|source/i.test(rule) ? "research" : /mail|message|whatsapp|draft|tone/i.test(rule) ? "writing" : "general";
+    await ins("learnings", { rule, scope, source: "user" });
+    await audit(voice ? "voice" : "chat", "learned", rule);
+    return { reply: `Seekh liya, Boss. Ab se har mission mein: "${rule}".` };
   }
   // 2) Ledger (user-entered money only)
   const m = text.match(R.money);
@@ -84,9 +96,12 @@ async function decide(id: number, approve: boolean, reason: string) {
     status: approve ? "approved" : "rejected", reason: reason || null, decided_at: new Date().toISOString(),
   });
   if (p && approve && p.kind === "addendum") await ins("addenda", { text: p.payload.rule });
+  if (p && approve && p.kind === "next") await createTask(p.payload.goal, undefined, { source: "chat", depth: p.payload.depth ?? 1 });
+  if (p && !approve && reason) await ins("learnings", { rule: `Boss rejected "${p.title}" because: ${reason}`, scope: "general", source: "user" }).catch(() => null);
+  if (p) await audit("chat", approve ? "approved" : "rejected", `${p.title}${reason ? ` — ${reason}` : ""}`);
 }
 
-const DELETABLE = new Set(["memory", "addenda", "watchlist", "ledger", "contacts", "reminders"]);
+const DELETABLE = new Set(["memory", "addenda", "watchlist", "ledger", "contacts", "reminders", "learnings"]);
 
 export async function POST(req: Request) {
   try {
@@ -116,6 +131,17 @@ export async function POST(req: Request) {
         await ins("contacts", { name: String(b.name).slice(0, 60), phone: String(b.phone).replace(/[^\d+]/g, "") }).catch(() => null); break;
       case "phone_setup": await linkPhone(String(b.url ?? "")); out = { reply: "Phone Link connected, Boss. Test call bhejun?" }; break;
       case "phone": await phone(b.op as PhoneOp, { number: b.number, text: b.text, name: b.name }); out = { reply: "Done, Boss." }; break;
+      case "power": {
+        const on = !!b.on;
+        await setSetting("nova_enabled", on ? "on" : "off"); resetFlags();
+        await audit("system", on ? "resumed" : "paused", on ? "Boss resumed NOVA" : "Boss pressed the master stop — every action, call and mission is frozen");
+        out = { reply: on ? "Back online, Boss. Missions continue." : "Sab rok diya, Boss. Koi call, message ya mission nahi chalega jab tak aap Resume nahi karte." };
+        break;
+      }
+      case "autopilot":
+        await setSetting("autopilot", b.on ? "on" : "off"); resetFlags();
+        await audit("system", "autopilot", b.on ? "Autopilot ON — NOVA starts her top next move after each mission" : "Autopilot OFF");
+        break;
       case "events_seen": await upd("device_events", "seen=eq.false", { seen: true }); break;
       case "reminder_done": await upd("reminders", `id=eq.${Number(b.id)}`, { done: true }); break;
       case "delete":
@@ -130,6 +156,7 @@ export async function POST(req: Request) {
 
 export async function GET(req: Request) {
   try {
+    if (new URL(req.url).searchParams.has("pnl")) return NextResponse.json(await paperPnl());
     if (new URL(req.url).searchParams.has("health")) return NextResponse.json({ health: await health(), search: searchEngine() });
     const state = await snapshot();
     if (new URL(req.url).searchParams.has("export"))

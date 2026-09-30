@@ -2,6 +2,7 @@
 // NOVA calls  https://trigger.macrodroid.com/<device-id>/nova?nova_action=call&nova_number=…  and one macro does the rest.
 // Phone → NOVA: MacroDroid "HTTP Request" to /api/device/event?key=… announces incoming calls.
 import { ins, sel } from "@/lib/db";
+import { audit, enabled, Paused } from "@/lib/guard";
 
 export const PHONE_OPS = ["call", "sms", "answer", "end_call", "speaker_on", "torch_on", "torch_off", "silent", "vibrate", "ring", "find_phone"] as const;
 export type PhoneOp = (typeof PHONE_OPS)[number];
@@ -22,13 +23,16 @@ export async function linkPhone(url: string) {
 }
 
 export async function phone(op: PhoneOp, p: { number?: string; text?: string; name?: string } = {}) {
+  if (!(await enabled())) { await audit("phone", `phone:${op}`, `${op} ${p.name ?? p.number ?? ""}`.trim(), "blocked"); throw new Paused(); }
   const base = await setting("phone_webhook");
   if (!base) throw new Error("Phone Link not set up yet — open Settings → Phone Link.");
   if (!(PHONE_OPS as readonly string[]).includes(op)) throw new Error("Unsupported phone action");
   const num = (p.number ?? "").replace(/[^\d+]/g, "");
   const q = new URLSearchParams({ nova_action: op, nova_number: num, nova_text: (p.text ?? "").slice(0, 900), nova_name: p.name ?? "" });
-  const r = await fetch(`${base}?${q}`, { signal: AbortSignal.timeout(10000) });
-  if (!r.ok) throw new Error(`Phone didn't accept the command (${r.status})`);
+  const what = `${op}${p.name || num ? ` → ${p.name || num}` : ""}${p.text ? `: “${p.text.slice(0, 120)}”` : ""}`;
+  const r = await fetch(`${base}?${q}`, { signal: AbortSignal.timeout(10000) }).catch((e) => { throw new Error(`Phone unreachable: ${(e as Error).message}`); });
+  if (!r.ok) { await audit("phone", `phone:${op}`, what, "failed"); throw new Error(`Phone didn't accept the command (${r.status})`); }
+  await audit("phone", `phone:${op}`, what);
   await ins("actions", { kind: `phone:${op}`, payload: { ...p, number: num } }).catch(() => null);
   return true;
 }
